@@ -28,6 +28,25 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.ASYNC).permitAll()
+                        .requestMatchers(
+                                "/",
+                                "/index.html",
+                                "/404.html",
+                                "/favicon.ico",
+                                "/*.html",
+                                "/*.txt",
+                                "/_next/**",
+                                "/login",
+                                "/login/**",
+                                "/51job/**",
+                                "/ai-config/**",
+                                "/base-data/**",
+                                "/boss/**",
+                                "/env-config/**",
+                                "/liepin/**",
+                                "/yupao/**",
+                                "/zhilian/**"
+                        ).permitAll()
                         .requestMatchers("/api/auth/login", "/api/auth/register", "/api/health").permitAll()
                         .anyRequest().authenticated())
                 .authenticationProvider(authenticationProvider())
