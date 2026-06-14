@@ -1,0 +1,26 @@
+spring:
+  datasource:
+    url: jdbc:sqlite:./data/getjobs.db
+    driver-class-name: org.sqlite.JDBC
+    username:
+    password:
+    hikari:
+      maximum-pool-size: 1
+      minimum-idle: 1
+      connection-timeout: 30000
+      connection-test-query: SELECT 1
+      connection-init-sql: PRAGMA foreign_keys=ON
+  flyway:
+    enabled: false
+  sql:
+    init:
+      mode: never
+
+jobs:
+  allowRuntimeDdl: false
+
+logging:
+  file:
+    name: ./logs/get-jobs.log
+  level:
+    org.flywaydb: OFF
