@@ -226,7 +226,7 @@ public class Boss {
             log.info("Boss navigate search finished: current={}", page.url());
             // 等待列表容器出现，确保页面完成首屏渲染
             try {
-                page.waitForSelector(BossPageModel.JOB_LIST_CONTAINER_SELECTOR, new Page.WaitForSelectorOptions().setTimeout(60_000));
+                waitForBossJobList(url);
             } catch (Exception e) {
                 log.warn("Boss job list wait failed: url={}, title={}, body={}", page.url(), safeTitle(page), compactText(safeBodyText(page)));
                 failPageModel("Boss职位列表未加载，可能页面结构变化、未登录或被风控", e);
@@ -654,6 +654,30 @@ public class Boss {
 
     private String getSearchUrl(String cityCode) {
         return buildSearchUrl(config, cityCode);
+    }
+
+    private void waitForBossJobList(String url) {
+        Exception lastError = null;
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                page.waitForSelector(BossPageModel.JOB_LIST_CONTAINER_SELECTOR,
+                        new Page.WaitForSelectorOptions().setTimeout(60_000));
+                return;
+            } catch (Exception e) {
+                lastError = e;
+                if (!"about:blank".equalsIgnoreCase(page.url()) || attempt >= 2) {
+                    break;
+                }
+                log.warn("Boss search page became blank; retrying navigation once: target={}", url);
+                page.navigate(url, new Page.NavigateOptions()
+                        .setWaitUntil(com.microsoft.playwright.options.WaitUntilState.DOMCONTENTLOADED)
+                        .setTimeout(60_000));
+            }
+        }
+        if (lastError instanceof RuntimeException runtimeException) {
+            throw runtimeException;
+        }
+        throw new RuntimeException(lastError);
     }
 
     /**
