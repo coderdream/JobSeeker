@@ -230,6 +230,13 @@ public class Boss {
             }
 
             // 1. 基于 footer 出现滚动到底，确保加载全部岗位
+            try {
+                page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE,
+                        new Page.WaitForLoadStateOptions().setTimeout(5_000));
+            } catch (Exception ignored) {
+                page.waitForTimeout(1_000);
+            }
+
             int lastCount = -1;
             int stableTries = 0;
             for (int i = 0; i < 5000; i++) { // 最多尝试约120次，避免死循环
@@ -239,8 +246,16 @@ public class Boss {
                     return;
                 }
                 Locator footer = page.locator("div#footer, #footer");
+                try {
                 if (footer.count() > 0 && footer.first().isVisible()) {
                     break; // 到达页面底部
+                }
+                } catch (Exception e) {
+                    if (e.getMessage() != null && e.getMessage().contains("Execution context was destroyed")) {
+                        page.waitForTimeout(1_000);
+                        continue;
+                    }
+                    throw e;
                 }
                 // 按视口高度的90%渐进滚动，触发懒加载
                 page.evaluate("() => window.scrollBy(0, Math.floor(window.innerHeight * 1.5))");
