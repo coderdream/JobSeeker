@@ -8,6 +8,12 @@ import com.wh.jobsbackend.worker.manager.PlaywrightAutomationContext;
 import com.wh.jobsbackend.worker.manager.PlaywrightManager;
 import lombok.extern.slf4j.Slf4j;
 
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Locale;
 
@@ -41,25 +47,40 @@ public class BossPlaywrightHandler extends AbstractPlatformPlaywrightHandler {
 
     @Override
     public void triggerLogin(Long userId) {
-        try {
-            Page page = page(userId);
-            page.setDefaultTimeout(PlaywrightManager.DEFAULT_TIMEOUT);
-            setupMonitoring(userId, page);
-
-            if (hasAuthenticatedSession(page)) {
-                setLoggedIn(userId, true);
-                saveCookies(userId, "login success");
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                openLoginPage(userId, attempt > 0);
                 return;
+            } catch (Exception e) {
+                if (attempt == 0 && isTargetClosed(e)) {
+                    log.warn("Boss page was closed; recreating page and retrying login: userId={}", userId);
+                    automationContext.resetPlatform(userId, PLATFORM);
+                    continue;
+                }
+                log.error("Trigger boss login failed: userId={}, error={}", userId, e.getMessage(), e);
+                throw new RuntimeException("Trigger Boss login flow failed", e);
             }
-
-            page.navigate(BossPageModel.LOGIN_URL, new Page.NavigateOptions()
-                    .setTimeout(60000)
-                    .setWaitUntil(WaitUntilState.DOMCONTENTLOADED));
-            setLoggedIn(userId, false);
-        } catch (Exception e) {
-            log.error("Trigger boss login failed: userId={}, error={}", userId, e.getMessage(), e);
-            throw new RuntimeException("触发Boss登录流程失败", e);
         }
+    }
+
+    private void openLoginPage(Long userId, boolean recovered) {
+        Page page = page(userId);
+        page.setDefaultTimeout(PlaywrightManager.DEFAULT_TIMEOUT);
+        setupMonitoring(userId, page);
+
+        String prefix = recovered ? "Opening Boss login page after recovery" : "Opening Boss login page";
+        log.info("{}: userId={}, currentUrl={}", prefix, userId, pageUrl(page));
+        page.navigate(BossPageModel.LOGIN_URL, new Page.NavigateOptions()
+                .setTimeout(60000)
+                .setWaitUntil(WaitUntilState.DOMCONTENTLOADED));
+        page.bringToFront();
+        ensureVisibleLoginTab();
+        boolean loggedIn = hasAuthenticatedSession(page) || checkLoggedIn(page);
+        setLoggedIn(userId, loggedIn);
+        if (loggedIn) {
+            saveCookies(userId, "login success");
+        }
+        log.info("Boss login page opened: userId={}, currentUrl={}, loggedIn={}", userId, pageUrl(page), loggedIn);
     }
 
     @Override
@@ -107,6 +128,42 @@ public class BossPlaywrightHandler extends AbstractPlatformPlaywrightHandler {
         }
         String domain = cookie.domain.toLowerCase(Locale.ROOT);
         return domain.equals(DOMAIN) || domain.endsWith("." + DOMAIN);
+    }
+
+    private boolean isTargetClosed(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            String className = current.getClass().getSimpleName();
+            String message = current.getMessage();
+            if (className.contains("TargetClosed")
+                    || message != null && message.contains("Target page, context or browser has been closed")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private void ensureVisibleLoginTab() {
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest listRequest = HttpRequest.newBuilder()
+                    .uri(URI.create("http://127.0.0.1:7866/json/list"))
+                    .GET()
+                    .build();
+            String targets = client.send(listRequest, HttpResponse.BodyHandlers.ofString()).body();
+            if (targets.contains(BossPageModel.LOGIN_URL)) {
+                return;
+            }
+            String encodedUrl = URLEncoder.encode(BossPageModel.LOGIN_URL, StandardCharsets.UTF_8);
+            HttpRequest openRequest = HttpRequest.newBuilder()
+                    .uri(URI.create("http://127.0.0.1:7866/json/new?" + encodedUrl))
+                    .PUT(HttpRequest.BodyPublishers.noBody())
+                    .build();
+            client.send(openRequest, HttpResponse.BodyHandlers.discarding());
+        } catch (Exception e) {
+            log.debug("Open visible Boss login tab through CDP failed: {}", e.getMessage());
+        }
     }
 
     @Override

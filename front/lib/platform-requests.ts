@@ -72,6 +72,10 @@ const LOGIN_PATHS: Partial<Record<PlatformKey, string>> = {
   yupao: "/api/yupao/login",
 }
 
+const LOGIN_CONFIRMED_PATHS: Partial<Record<PlatformKey, string>> = {
+  boss: "/api/boss/login-confirmed",
+}
+
 async function readJson<T>(response: Response): Promise<T> {
   return response.json().catch(() => ({})) as Promise<T>
 }
@@ -141,6 +145,22 @@ export async function openPlatformLogin(authedFetch: AuthedFetch, platform: Plat
 
   if (!response.ok || payload.success === false) {
     throw new Error(payload.message || `${PLATFORM_LABELS[platform]} 登录入口打开失败`)
+  }
+
+  return payload
+}
+
+export async function confirmPlatformLogin(authedFetch: AuthedFetch, platform: PlatformKey) {
+  const path = LOGIN_CONFIRMED_PATHS[platform]
+  if (!path) {
+    return getPlatformStatus(authedFetch, platform, { refreshLogin: true })
+  }
+
+  const response = await authedFetch(path, { method: "POST" })
+  const payload = await readJson<PlatformStatusResponse>(response)
+
+  if (!response.ok || payload.success === false) {
+    throw new Error(payload.message || `${PLATFORM_LABELS[platform]} login status refresh failed`)
   }
 
   return payload

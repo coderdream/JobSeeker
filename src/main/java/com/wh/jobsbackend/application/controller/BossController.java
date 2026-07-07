@@ -15,6 +15,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.awt.Desktop;
+import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Executor;
@@ -137,8 +139,8 @@ public class BossController {
     public ResponseEntity<Map<String, Object>> triggerBossLogin() {
         Map<String, Object> response = new HashMap<>();
         try {
-            Long userId = currentUserService.requireUserId();
-            playwrightManager.triggerBossLogin(userId);
+            currentUserService.requireUserId();
+            openSystemBrowser("https://www.zhipin.com/web/user/?ka=header-login");
             response.put("success", true);
             response.put("message", "已打开 Boss 登录页面，请完成登录");
             return ResponseEntity.ok(response);
@@ -148,6 +150,28 @@ public class BossController {
             response.put("message", "触发登录失败: " + e.getMessage());
             return ResponseEntity.internalServerError().body(response);
         }
+    }
+
+    private void openSystemBrowser(String url) throws Exception {
+        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+            Desktop.getDesktop().browse(URI.create(url));
+            return;
+        }
+        new ProcessBuilder("rundll32", "url.dll,FileProtocolHandler", url).start();
+    }
+
+    /** POST - confirm Boss login completed in the system browser */
+    @PostMapping("/login-confirmed")
+    public ResponseEntity<Map<String, Object>> confirmBossLogin() {
+        Long userId = currentUserService.requireUserId();
+        playwrightManager.setLoginStatus(userId, "boss", true);
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "platform", "boss",
+                "isLoggedIn", true,
+                "message", "Boss 登录状态已刷新",
+                "timestamp", System.currentTimeMillis()
+        ));
     }
 
     /** POST - logout Boss */
@@ -176,11 +200,14 @@ public class BossController {
 
     /** GET - 获取Boss任务状态 */
     @GetMapping("/status")
-    public ResponseEntity<Map<String, Object>> getBossStatus() {
+    public ResponseEntity<Map<String, Object>> getBossStatus(@RequestParam(defaultValue = "false") boolean refreshLogin) {
         Long userId = currentUserService.requireUserId();
         Map<String, Object> status = new HashMap<>(bossJobService.getStatus(userId));
         status.put("success", true);
-        status.put("isLoggedIn", playwrightManager.refreshLoginStatus(userId, "boss"));
+        boolean loggedIn = refreshLogin
+                ? playwrightManager.refreshLoginStatus(userId, "boss")
+                : playwrightManager.getCachedLoginStatus(userId, "boss");
+        status.put("isLoggedIn", loggedIn);
         status.put("timestamp", System.currentTimeMillis());
         return ResponseEntity.ok(status);
     }

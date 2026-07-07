@@ -1712,10 +1712,7 @@ public class PlaywrightManager {
     }
 
     public boolean getCachedLoginStatus(Long userId, String platform) {
-        if (platformRuntime != null) {
-            return platformRuntime.getCachedLoginStatus(userId, platform);
-        }
-        return false;
+        return ensureAutomationContext().isLoggedIn(userId, platform);
     }
 
     public void setLoginStatus(Long userId, String platform, boolean isLoggedIn) {

@@ -71,6 +71,21 @@ public class PlatformRuntime {
         return session.getContexts().get(platform);
     }
 
+    public void resetPlatform(Long userId, String platform) {
+        UserAutomationSession session = registry.getExisting(userId);
+        if (session == null) {
+            return;
+        }
+        Page page = session.getPages().remove(platform);
+        if (page != null) {
+            try {
+                page.close();
+            } catch (Exception ignored) {
+            }
+        }
+        discardContext(session, platform);
+    }
+
     private BrowserContext getOrCreateContext(UserAutomationSession session, Long userId, String platform) {
         return session.getContexts().computeIfAbsent(platform, key -> {
             BrowserContext context = contextFactory.create(session, key);

@@ -96,6 +96,11 @@ public class PlaywrightAutomationContext {
         return platformRuntime.getPlatformLock(userId, platform);
     }
 
+    public void resetPlatform(Long userId, String platform) {
+        ensureRuntime();
+        platformRuntime.resetPlatform(userId, platform);
+    }
+
     public boolean isLoggedIn(Long userId, String platform) {
         ensureRuntime();
         return platformRuntime.isLoggedIn(userId, platform);

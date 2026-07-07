@@ -14,7 +14,7 @@ import PageHeader from '@/app/components/PageHeader'
 import AnalysisContent from '@/app/boss/analysis/AnalysisContent'
 import { useAuthedRequest } from '@/components/auth/useAuthedRequest'
 import { getApiBaseUrl } from '@/lib/api-client'
-import { openPlatformLogin, startPlatformTask } from '@/lib/platform-requests'
+import { confirmPlatformLogin, openPlatformLogin, startPlatformTask } from '@/lib/platform-requests'
 import { FeedbackDialog } from '@/components/workbench/feedback-dialog'
 import { PlatformStatusBar } from '@/components/workbench/platform-status-bar'
 
@@ -527,6 +527,18 @@ export default function BossPage() {
     }
   }
 
+  const handleConfirmLogin = async () => {
+    try {
+      setCheckingLogin(true)
+      const status = await confirmPlatformLogin(authedFetch, 'boss')
+      setIsLoggedIn(Boolean(status.isLoggedIn))
+    } catch (error) {
+      console.error('[Boss] refresh login status failed:', error)
+    } finally {
+      setCheckingLogin(false)
+    }
+  }
+
   const handleStopDelivery = async () => {
     try {
       const response = await authedFetch('/api/boss/stop', {
@@ -590,9 +602,14 @@ export default function BossPage() {
                 <BiPlay className="mr-1" /> 检查登录中...
               </Button>
             ) : !isLoggedIn ? (
-              <Button onClick={handleOpenLogin} size="sm" className="px-3">
+              <div className="flex items-center gap-2">
+                <Button onClick={handleOpenLogin} size="sm" className="px-3">
                 <BiPlay className="mr-1" /> 打开Boss登录
-              </Button>
+                </Button>
+                <Button onClick={handleConfirmLogin} size="sm" variant="outline" className="px-3">
+                  <BiSearch className="mr-1" /> 刷新登录状态
+                </Button>
+              </div>
             ) : isDelivering ? (
               <Button onClick={handleStopDelivery} size="sm" variant="destructive" className="px-3">
                 <BiStop className="mr-1" /> 停止投递
