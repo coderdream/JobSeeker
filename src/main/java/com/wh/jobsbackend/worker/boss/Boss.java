@@ -226,6 +226,7 @@ public class Boss {
             try {
                 page.waitForSelector(BossPageModel.JOB_LIST_CONTAINER_SELECTOR, new Page.WaitForSelectorOptions().setTimeout(60_000));
             } catch (Exception e) {
+                log.warn("Boss job list wait failed: url={}, title={}, body={}", page.url(), safeTitle(page), compactText(safeBodyText(page)));
                 failPageModel("Boss职位列表未加载，可能页面结构变化、未登录或被风控", e);
             }
 
@@ -859,6 +860,14 @@ public class Boss {
         try {
             Object text = targetPage.evaluate("() => document.body ? document.body.innerText : ''");
             return text == null ? "" : String.valueOf(text);
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private String safeTitle(Page targetPage) {
+        try {
+            return targetPage.title();
         } catch (Exception ignored) {
             return "";
         }
