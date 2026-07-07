@@ -103,4 +103,9 @@ public class BossConfig {
      * HR未上线状态
      */
     private List<String> deadStatus;
+
+    /**
+     * Maximum chats to initiate for each search keyword. Null or non-positive means unlimited.
+     */
+    private Integer maxDeliveriesPerKeyword;
 }

@@ -280,6 +280,11 @@ public class Boss {
                 failPageModel("Boss当前页职位卡片数量为0，停止投递", null);
             }
             for (int i = 0; i < count; i++) {
+                Integer maxDeliveries = config.getMaxDeliveriesPerKeyword();
+                if (maxDeliveries != null && maxDeliveries > 0 && postCount >= maxDeliveries) {
+                    progressCallback.accept("当前关键词已达到投递上限：" + keyword, postCount, maxDeliveries);
+                    break;
+                }
                 // 检查是否需要停止
                 if (shouldStopCallback != null && Boolean.TRUE.equals(shouldStopCallback.get())) {
                     progressCallback.accept("用户取消投递", i, count);

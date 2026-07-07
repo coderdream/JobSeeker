@@ -322,6 +322,7 @@ public class BossService {
 
         // HR不在线状态（括号列表字符串）
         config.setDeadStatus(parseListString(entity.getDeadStatus()));
+        config.setMaxDeliveriesPerKeyword(readPositiveIntSetting("BOSS_MAX_DELIVERIES_PER_KEYWORD", "boss.maxDeliveriesPerKeyword"));
 
         log.info("已从 hub_boss_config 加载Boss配置，并完成括号列表解析");
         return config;
@@ -331,6 +332,23 @@ public class BossService {
      * 解析括号列表或逗号分隔的字符串为列表，例如 "[a,b,c]" 或 "a,b,c"。
      * 空值返回空列表。
      */
+    private Integer readPositiveIntSetting(String envName, String propertyName) {
+        String raw = System.getenv(envName);
+        if (raw == null || raw.isBlank()) {
+            raw = System.getProperty(propertyName);
+        }
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            int value = Integer.parseInt(raw.trim());
+            return value > 0 ? value : null;
+        } catch (NumberFormatException e) {
+            log.warn("Ignoring invalid integer setting {} / {}: {}", envName, propertyName, raw);
+            return null;
+        }
+    }
+
     public List<String> parseListString(String raw) {
         if (raw == null || raw.trim().isEmpty()) return Collections.emptyList();
         String s = raw.trim();
