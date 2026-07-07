@@ -219,9 +219,11 @@ public class Boss {
             String encodedKeyword = URLEncoder.encode(keyword, StandardCharsets.UTF_8);
 
             String url = searchUrl + (searchUrl.contains("?") ? "&" : "?") + "query=" + encodedKeyword;
+            log.info("Boss navigate search: target={}", url);
             page.navigate(url, new Page.NavigateOptions()
                     .setWaitUntil(com.microsoft.playwright.options.WaitUntilState.DOMCONTENTLOADED)
-                    .setTimeout(15_000));
+                    .setTimeout(60_000));
+            log.info("Boss navigate search finished: current={}", page.url());
             // 等待列表容器出现，确保页面完成首屏渲染
             try {
                 page.waitForSelector(BossPageModel.JOB_LIST_CONTAINER_SELECTOR, new Page.WaitForSelectorOptions().setTimeout(60_000));
