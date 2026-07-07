@@ -261,11 +261,28 @@ public class Boss {
                     throw e;
                 }
                 // 按视口高度的90%渐进滚动，触发懒加载
-                page.evaluate("() => window.scrollBy(0, Math.floor(window.innerHeight * 1.5))");
+                try {
+                    page.evaluate("() => window.scrollBy(0, Math.floor(window.innerHeight * 1.5))");
+                } catch (Exception e) {
+                    if (e.getMessage() != null && e.getMessage().contains("Execution context was destroyed")) {
+                        page.waitForTimeout(1_000);
+                        continue;
+                    }
+                    throw e;
+                }
 
                 // 获取卡片数量变化，判断是否需要强制触底
                 Locator cardsProbe = page.locator(BossPageModel.JOB_CARD_SELECTOR);
-                int currentCount = cardsProbe.count();
+                int currentCount;
+                try {
+                    currentCount = cardsProbe.count();
+                } catch (Exception e) {
+                    if (e.getMessage() != null && e.getMessage().contains("Execution context was destroyed")) {
+                        page.waitForTimeout(1_000);
+                        continue;
+                    }
+                    throw e;
+                }
                 if (currentCount == lastCount) {
                     stableTries++;
                 } else {
