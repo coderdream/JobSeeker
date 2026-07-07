@@ -291,6 +291,14 @@ public class PlaywrightManager {
             );
             if (!cookies.isEmpty()) {
                 targetContext.addCookies(cookies);
+                log.info("Loaded platform cookies: userId={}, platform={}, domain={}, count={}, names={}",
+                        userId,
+                        platform,
+                        domain,
+                        cookies.size(),
+                        cookies.stream().map(cookie -> cookie.name).toList());
+            } else {
+                log.warn("No platform cookies matched domain: userId={}, platform={}, domain={}", userId, platform, domain);
             }
         } catch (Exception e) {
             log.warn("Load cookies failed: userId={}, platform={}, error={}", userId, platform, e.getMessage());
