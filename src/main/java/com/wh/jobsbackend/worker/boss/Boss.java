@@ -431,6 +431,15 @@ public class Boss {
                 }
 
                 // 创建Job对象（全部基于 JSON 字段）
+                if (isSalaryBelowMinimum(jobSalary, 12)) {
+                    log.info("Filtered by salary below 12K | company={} | job={} | salary={}", bossCompany != null ? bossCompany : "", jobName != null ? jobName : "", jobSalary);
+                    continue;
+                }
+                if (hasAgeLimit(jobDesc)) {
+                    log.info("Filtered by age limit | company={} | job={} | salary={}", bossCompany != null ? bossCompany : "", jobName != null ? jobName : "", jobSalary);
+                    continue;
+                }
+
                 Job job = new Job();
                 job.setJobName(jobName != null ? jobName : "");
                 job.setSalary(jobSalary != null ? jobSalary : "");
@@ -623,6 +632,21 @@ public class Boss {
         } catch (Exception ignore) {
         }
         return null;
+    }
+
+    private boolean isSalaryBelowMinimum(String salary, int minimumK) {
+        BossService.SalaryInfo info = BossService.parseSalary(salary);
+        return info != null && info.minK != null && info.minK < minimumK;
+    }
+
+    private boolean hasAgeLimit(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        String normalized = text.replaceAll("\\s+", "");
+        return normalized.matches(".*(年龄|年纪|岁数).{0,8}(35|40|45|三十五|四十|四十五).{0,8}(以内|以下|以下|以下优先|以下者|不超过|以下).*")
+                || normalized.matches(".*(35|40|45|三十五|四十|四十五).{0,4}(岁|周岁).{0,8}(以内|以下|不超过|以下优先).*")
+                || normalized.matches(".*(90后|95后|00后|年轻化|年龄要求).*");
     }
 
     public static String buildSearchUrl(BossConfig config, String cityCode) {
