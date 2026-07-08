@@ -8,12 +8,6 @@ import com.wh.jobsbackend.worker.manager.PlaywrightAutomationContext;
 import com.wh.jobsbackend.worker.manager.PlaywrightManager;
 import lombok.extern.slf4j.Slf4j;
 
-import java.net.URI;
-import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Locale;
 
@@ -74,7 +68,6 @@ public class BossPlaywrightHandler extends AbstractPlatformPlaywrightHandler {
                 .setTimeout(60000)
                 .setWaitUntil(WaitUntilState.DOMCONTENTLOADED));
         page.bringToFront();
-        ensureVisibleLoginTab();
         boolean loggedIn = hasAuthenticatedSession(page) || checkLoggedIn(page);
         setLoggedIn(userId, loggedIn);
         if (loggedIn) {
@@ -89,13 +82,16 @@ public class BossPlaywrightHandler extends AbstractPlatformPlaywrightHandler {
             return false;
         }
         String currentUrl = pageUrl(page);
+        if (hasAuthenticatedSession(page)) {
+            return true;
+        }
         if (BossPageModel.isLoggedInUrl(currentUrl)) {
             return true;
         }
         if (isBlankUrl(currentUrl) || BossPageModel.isLoginUrl(currentUrl)) {
             return false;
         }
-        return hasAuthenticatedSession(page);
+        return false;
     }
 
     private String pageUrl(Page page) {
@@ -142,28 +138,6 @@ public class BossPlaywrightHandler extends AbstractPlatformPlaywrightHandler {
             current = current.getCause();
         }
         return false;
-    }
-
-    private void ensureVisibleLoginTab() {
-        try {
-            HttpClient client = HttpClient.newHttpClient();
-            HttpRequest listRequest = HttpRequest.newBuilder()
-                    .uri(URI.create("http://127.0.0.1:7866/json/list"))
-                    .GET()
-                    .build();
-            String targets = client.send(listRequest, HttpResponse.BodyHandlers.ofString()).body();
-            if (targets.contains(BossPageModel.LOGIN_URL)) {
-                return;
-            }
-            String encodedUrl = URLEncoder.encode(BossPageModel.LOGIN_URL, StandardCharsets.UTF_8);
-            HttpRequest openRequest = HttpRequest.newBuilder()
-                    .uri(URI.create("http://127.0.0.1:7866/json/new?" + encodedUrl))
-                    .PUT(HttpRequest.BodyPublishers.noBody())
-                    .build();
-            client.send(openRequest, HttpResponse.BodyHandlers.discarding());
-        } catch (Exception e) {
-            log.debug("Open visible Boss login tab through CDP failed: {}", e.getMessage());
-        }
     }
 
     @Override
