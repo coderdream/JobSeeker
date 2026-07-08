@@ -8,6 +8,9 @@ target/
 # Logs
 *.log
 
+# Runtime browser profiles
+.runtime/
+
 # OS
 .DS_Store
 Thumbs.db

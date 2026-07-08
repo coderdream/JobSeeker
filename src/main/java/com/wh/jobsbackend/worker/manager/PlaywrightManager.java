@@ -27,6 +27,9 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -227,12 +230,42 @@ public class PlaywrightManager {
     }
 
     private BrowserContext newUserContext(UserAutomationSession session, String platform) {
+        if ("boss".equals(platform)) {
+            return newBossPersistentContext(session);
+        }
         return session.getBrowser().newContext(new Browser.NewContextOptions()
                 .setViewportSize(null)
                 .setLocale("zh-CN")
                 .setTimezoneId("Asia/Shanghai")
                 .setExtraHTTPHeaders(extraHeadersForPlatform(platform))
                 .setUserAgent(userAgentForPlatform(session, platform)));
+    }
+
+    private BrowserContext newBossPersistentContext(UserAutomationSession session) {
+        try {
+            Path profileDir = Paths.get(System.getProperty("user.dir"), ".runtime", "playwright", "boss-user-" + session.getUserId())
+                    .toAbsolutePath()
+                    .normalize();
+            Files.createDirectories(profileDir);
+            BrowserType.LaunchPersistentContextOptions options = new BrowserType.LaunchPersistentContextOptions()
+                    .setHeadless(false)
+                    .setChannel("chrome")
+                    .setViewportSize(null)
+                    .setLocale("zh-CN")
+                    .setTimezoneId("Asia/Shanghai")
+                    .setExtraHTTPHeaders(extraHeadersForPlatform("boss"))
+                    .setUserAgent(windowsChromeUserAgent(session.getBrowser()))
+                    .setArgs(List.of(
+                            "--disable-blink-features=AutomationControlled",
+                            "--disable-infobars",
+                            "--no-first-run",
+                            "--start-maximized"
+                    ));
+            log.info("Creating Boss persistent browser context: userId={}, profileDir={}", session.getUserId(), profileDir);
+            return playwright.chromium().launchPersistentContext(profileDir, options);
+        } catch (IOException e) {
+            throw new RuntimeException("创建 Boss 持久化浏览器目录失败", e);
+        }
     }
 
     private String userAgentForPlatform(UserAutomationSession session, String platform) {
