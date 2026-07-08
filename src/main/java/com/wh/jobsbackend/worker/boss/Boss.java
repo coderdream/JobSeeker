@@ -232,7 +232,7 @@ public class Boss {
                 failPageModel("Boss职位列表未加载，可能页面结构变化、未登录或被风控", e);
             }
 
-            // 1. 基于 footer 出现滚动到底，确保加载全部岗位
+            // Boss 搜索列表会按视口虚拟化渲染，投递前不要先滚到底，否则当前卡片会从 DOM 中卸载。
             try {
                 page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE,
                         new Page.WaitForLoadStateOptions().setTimeout(5_000));
@@ -240,75 +240,17 @@ public class Boss {
                 page.waitForTimeout(1_000);
             }
 
-            int lastCount = -1;
-            int stableTries = 0;
-            for (int i = 0; i < 5000; i++) { // 最多尝试约120次，避免死循环
-                // 停止检查：滚动加载过程中也要及时响应
-                if (shouldStopCallback != null && Boolean.TRUE.equals(shouldStopCallback.get())) {
-                    progressCallback.accept("用户取消投递", 0, 0);
-                    return;
-                }
-                Locator footer = page.locator("div#footer, #footer");
-                try {
-                if (footer.count() > 0 && footer.first().isVisible()) {
-                    break; // 到达页面底部
-                }
-                } catch (Exception e) {
-                    if (e.getMessage() != null && e.getMessage().contains("Execution context was destroyed")) {
-                        page.waitForTimeout(1_000);
-                        continue;
-                    }
-                    throw e;
-                }
-                // 按视口高度的90%渐进滚动，触发懒加载
-                try {
-                    page.evaluate("() => window.scrollBy(0, Math.floor(window.innerHeight * 1.5))");
-                } catch (Exception e) {
-                    if (e.getMessage() != null && e.getMessage().contains("Execution context was destroyed")) {
-                        page.waitForTimeout(1_000);
-                        continue;
-                    }
-                    throw e;
-                }
-
-                // 获取卡片数量变化，判断是否需要强制触底
-                Locator cardsProbe = page.locator(BossPageModel.JOB_CARD_SELECTOR);
-                int currentCount;
-                try {
-                    currentCount = cardsProbe.count();
-                } catch (Exception e) {
-                    if (e.getMessage() != null && e.getMessage().contains("Execution context was destroyed")) {
-                        page.waitForTimeout(1_000);
-                        continue;
-                    }
-                    throw e;
-                }
-                if (currentCount == lastCount) {
-                    stableTries++;
-                } else {
-                    stableTries = 0;
-                }
-                lastCount = currentCount;
-
-                if (stableTries >= 3) { // 连续多次无新增，则强制触底一次
-                    page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)");
-                    // 触底不再等待，继续检测 footer 出现
-                }
-            }
-            // 统计最终岗位数量
             Locator cardsFinal = page.locator(BossPageModel.JOB_CARD_SELECTOR);
             int loadedCount = cardsFinal.count();
             if (loadedCount == 0) {
-                failPageModel("Boss当前页未找到职位卡片，可能页面模型已失效", null);
+                log.warn("Boss current cards empty after list wait: url={}, title={}, body={}",
+                        page.url(), safeTitle(page), compactText(safeBodyText(page)));
+                failPageModel("Boss当前页未找到职位卡片，可能页面模型已失效或被风控", null);
             }
-            log.info("【{}】岗位已全部加载，总数:{}", keyword, loadedCount);
+            log.info("【{}】当前可见岗位加载完成，总数:{}", keyword, loadedCount);
             progressCallback.accept("岗位加载完成：" + keyword, 0, loadedCount);
 
-            // 2. 回到页面顶部
-            page.evaluate("window.scrollTo(0, 0);");
-            PlaywrightUtil.sleep(1);
-
-            // 3. 逐个遍历所有岗位
+            // 逐个遍历当前可见岗位。需要更多候选时，由下一轮搜索或后续增量滚动逻辑补充。
             Locator cards = page.locator(BossPageModel.JOB_CARD_SELECTOR);
             int count = cards.count();
             if (count == 0) {
