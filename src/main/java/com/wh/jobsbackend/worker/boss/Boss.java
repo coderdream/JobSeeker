@@ -450,8 +450,9 @@ public class Boss {
 
                 // 输出
                 progressCallback.accept("正在投递：" + jobName, i + 1, count);
-                resumeSubmission(keyword, job);
-                postCount++;
+                if (resumeSubmission(keyword, job)) {
+                    postCount++;
+                }
 
                 // 为避免点击下面的卡片触发页面刷新：在点击5个卡片之后，每次点击后适度下滑
                 try {
@@ -708,16 +709,16 @@ public class Boss {
      * 备注：目前Boss无法通过新标签页打开立即沟通按钮，所以只能点击更多详情，然后从更多详情里打开聊天按钮
      */
     @SneakyThrows
-    private void resumeSubmission(String keyword, Job job) {
+    private boolean resumeSubmission(String keyword, Job job) {
         // 若收到停止指令，直接短路返回
         if (shouldStopCallback != null && Boolean.TRUE.equals(shouldStopCallback.get())) {
             log.info("停止指令已触发，跳过投递 | 公司：{} | 岗位：{}", job.getCompanyName(), job.getJobName());
-            return;
+            return false;
         }
         // 调试模式：仅遍历不投递
         if (Boolean.TRUE.equals(config.getDebugger())) {
             log.info("调试模式：仅遍历岗位，不投递 | 公司：{} | 岗位：{}", job.getCompanyName(), job.getJobName());
-            return;
+            return false;
         }
 
         // 1. 查找"查看更多信息"按钮（必须存在且新开页）
@@ -745,7 +746,7 @@ public class Boss {
             if (shouldStopCallback != null && Boolean.TRUE.equals(shouldStopCallback.get())) {
                 log.info("停止指令已触发，结束查找聊天按钮 | 公司：{} | 岗位：{}", job.getCompanyName(), job.getJobName());
                 try { detailPage.close(); } catch (Exception ignore) {}
-                return;
+                return false;
             }
             if (chatBtn.count() > 0 && (chatBtn.first().textContent().contains("立即沟通"))) {
                 foundChatBtn = true;
@@ -771,7 +772,7 @@ public class Boss {
             if (shouldStopCallback != null && Boolean.TRUE.equals(shouldStopCallback.get())) {
                 log.info("停止指令已触发，结束等待聊天输入框 | 公司：{} | 岗位：{}", job.getCompanyName(), job.getJobName());
                 try { detailPage.close(); } catch (Exception ignore) {}
-                return;
+                return false;
             }
             if (inputLocator.count() > 0 && inputLocator.first().isVisible()) {
                 inputReady = true;
@@ -868,6 +869,7 @@ public class Boss {
                 }
             }
         }
+        return sendSuccess;
     }
 
     private boolean waitForBossDeliveryConfirmation(Page targetPage) {

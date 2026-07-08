@@ -10,8 +10,8 @@ public final class BossPageModel {
     static final String JOB_CARD_SELECTOR = "ul.rec-job-list li.job-card-box, li.job-card-box";
     static final String MORE_INFO_BUTTON_SELECTOR = "a.more-job-btn";
     static final String CHAT_BUTTON_SELECTOR = "a.btn-startchat, a.op-btn-chat";
-    static final String CHAT_INPUT_SELECTOR = "div#chat-input.chat-input[contenteditable='true'], textarea.input-area";
-    static final String SEND_BUTTON_SELECTOR = "div.send-message, button[type='send'].btn-send, button.btn-send";
+    static final String CHAT_INPUT_SELECTOR = "div#chat-input.chat-input[contenteditable='true'], div[contenteditable='true'].chat-input, textarea.input-area";
+    static final String SEND_BUTTON_SELECTOR = "div.send-message, button[type='send'].btn-send, button.btn-send:not(.btn-sendimg)";
     static final String SUCCESS_CONFIRM_SELECTOR = ".chat-message, .message-content, .toast, .tip, .dialog-con, .dialog-container";
     static final String BLOCKING_OVERLAY_SELECTOR = ".dialog-container, .dialog-wrap, .modal, .toast, .verify-dialog, .app-download, [class*='dialog'], [class*='modal']";
     static final String CLOSE_BUTTON_SELECTOR = "i.icon-close, button[aria-label='Close'], [class*='close']";
@@ -27,7 +27,10 @@ public final class BossPageModel {
                 || text.contains("发送成功")
                 || text.contains("沟通成功")
                 || text.contains("立即沟通成功")
-                || text.contains("已发出");
+                || text.contains("已发出")
+                || text.contains("送达")
+                || text.contains("已读")
+                || text.contains("继续沟通");
     }
 
     static boolean isBlockingText(String text) {
