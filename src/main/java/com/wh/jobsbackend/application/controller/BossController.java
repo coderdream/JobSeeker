@@ -15,8 +15,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.awt.Desktop;
-import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Executor;
@@ -139,8 +137,8 @@ public class BossController {
     public ResponseEntity<Map<String, Object>> triggerBossLogin() {
         Map<String, Object> response = new HashMap<>();
         try {
-            currentUserService.requireUserId();
-            openSystemBrowser("https://www.zhipin.com/web/user/?ka=header-login");
+            Long userId = currentUserService.requireUserId();
+            playwrightManager.triggerBossLogin(userId);
             response.put("success", true);
             response.put("message", "已打开 Boss 登录页面，请完成登录");
             return ResponseEntity.ok(response);
@@ -150,14 +148,6 @@ public class BossController {
             response.put("message", "触发登录失败: " + e.getMessage());
             return ResponseEntity.internalServerError().body(response);
         }
-    }
-
-    private void openSystemBrowser(String url) throws Exception {
-        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
-            Desktop.getDesktop().browse(URI.create(url));
-            return;
-        }
-        new ProcessBuilder("rundll32", "url.dll,FileProtocolHandler", url).start();
     }
 
     /** POST - confirm Boss login completed in the system browser */
