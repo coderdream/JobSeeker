@@ -22,7 +22,12 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -52,6 +57,7 @@ public class Boss {
     private Set<String> blackCompanies;
     private Set<String> blackRecruiters;
     private Set<String> blackJobs;
+    private static final DateTimeFormatter DIAGNOSTIC_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
     // 记录 encryptId -> encryptUserId 的映射，用于后续更新投递状态
     private final ConcurrentMap<String, String> encryptIdToUserId = new ConcurrentHashMap<>();
     @Setter
@@ -228,7 +234,7 @@ public class Boss {
             try {
                 waitForBossJobList(url);
             } catch (Exception e) {
-                log.warn("Boss job list wait failed: url={}, title={}, body={}", page.url(), safeTitle(page), compactText(safeBodyText(page)));
+                logBossPageDiagnostic("job-list-wait-failed");
                 failPageModel("Boss职位列表未加载，可能页面结构变化、未登录或被风控", e);
             }
 
@@ -243,8 +249,7 @@ public class Boss {
             Locator cardsFinal = page.locator(BossPageModel.JOB_CARD_SELECTOR);
             int loadedCount = cardsFinal.count();
             if (loadedCount == 0) {
-                log.warn("Boss current cards empty after list wait: url={}, title={}, body={}",
-                        page.url(), safeTitle(page), compactText(safeBodyText(page)));
+                logBossPageDiagnostic("job-cards-empty");
                 failPageModel("Boss当前页未找到职位卡片，可能页面模型已失效或被风控", null);
             }
             log.info("【{}】当前可见岗位加载完成，总数:{}", keyword, loadedCount);
@@ -645,6 +650,21 @@ public class Boss {
             throw runtimeException;
         }
         throw new RuntimeException(lastError);
+    }
+
+    private void logBossPageDiagnostic(String reason) {
+        String screenshotPath = "";
+        try {
+            Path diagnosticDir = Paths.get("target", "diagnostics", "boss");
+            Files.createDirectories(diagnosticDir);
+            Path path = diagnosticDir.resolve(reason + "-" + DIAGNOSTIC_TIME_FORMAT.format(LocalDateTime.now()) + ".png");
+            page.screenshot(new Page.ScreenshotOptions().setPath(path).setFullPage(true));
+            screenshotPath = path.toAbsolutePath().toString();
+        } catch (Exception e) {
+            screenshotPath = "screenshot failed: " + e.getMessage();
+        }
+        log.warn("Boss page diagnostic: reason={}, url={}, title={}, screenshot={}, body={}",
+                reason, page.url(), safeTitle(page), screenshotPath, compactText(safeBodyText(page)));
     }
 
     /**
