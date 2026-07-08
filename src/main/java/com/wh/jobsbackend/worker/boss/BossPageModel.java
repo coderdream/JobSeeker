@@ -6,7 +6,7 @@ import java.util.Set;
 
 public final class BossPageModel {
     public static final String LOGIN_URL = "https://www.zhipin.com/web/user/?ka=header-login";
-    static final String JOB_LIST_CONTAINER_SELECTOR = "ul.rec-job-list, div.job-list-container";
+    static final String JOB_LIST_CONTAINER_SELECTOR = "ul.rec-job-list, div.job-list-container, ul.rec-job-list li.job-card-box, li.job-card-box";
     static final String JOB_CARD_SELECTOR = "ul.rec-job-list li.job-card-box, li.job-card-box";
     static final String MORE_INFO_BUTTON_SELECTOR = "a.more-job-btn";
     static final String CHAT_BUTTON_SELECTOR = "a.btn-startchat, a.op-btn-chat";
