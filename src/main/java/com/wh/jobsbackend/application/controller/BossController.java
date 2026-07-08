@@ -71,7 +71,6 @@ public class BossController {
             Long userId = currentUserService.requireUserId();
             if (!playwrightManager.isLoggedIn(userId, "boss")) {
                 response.put("success", false);
-                /*
                 response.put("message", "请先登录Boss直聘");
                 response.put("status", "not_logged_in");
                 return ResponseEntity.badRequest().body(response);
@@ -79,8 +78,6 @@ public class BossController {
             if (bossJobService.isRunning(userId)) {
                 response.put("success", false);
                 response.put("message", "Boss任务已在运行中，请等待当前任务完成");
-                */
-                response.put("message", "\u5f53\u524d\u5df2\u6709Boss\u4efb\u52a1\u5728\u8fd0\u884c\u4e2d");
                 response.put("status", "running");
                 return ResponseEntity.badRequest().body(response);
             }
