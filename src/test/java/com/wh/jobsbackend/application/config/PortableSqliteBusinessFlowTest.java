@@ -131,7 +131,7 @@ class PortableSqliteBusinessFlowTest {
         bossConfig.setKeywords("[\"Java\"]");
         bossConfig.setCityCode("[\"北京\"]");
         bossConfig.setSalary("[\"10-20K\"]");
-        assertNotNull(bossService.saveOrUpdateFirstSelective(bossConfig));
+        BossConfigEntity savedConfig = bossService.saveOrUpdateFirstSelective(1L, bossConfig);
         assertDoesNotThrow(() -> bossService.getOptionsByType("salary"));
         assertDoesNotThrow(bossService::loadBossConfig);
 

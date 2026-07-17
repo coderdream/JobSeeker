@@ -41,6 +41,7 @@ class SseControllerTest {
 
         MockMvc mockMvc = standaloneSetup(new BossController(
                 mock(BossJobService.class),
+                mock(com.wh.jobsbackend.application.service.BossService.class),
                 playwrightManager,
                 mock(CookieService.class),
                 currentUserService,

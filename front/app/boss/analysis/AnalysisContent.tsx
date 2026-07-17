@@ -290,6 +290,78 @@ export default function AnalysisContent({ showHeader = false }: { showHeader?: b
   const [exporting, setExporting] = useState(false)
   const [filterHeadhunter, setFilterHeadhunter] = useState<boolean>(false)
 
+  const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [applying, setApplying] = useState(false)
+  const [discardingId, setDiscardingId] = useState<number | null>(null)
+
+  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.checked) {
+      setSelectedIds(items.map(it => it.id))
+    } else {
+      setSelectedIds([])
+    }
+  }
+
+  const handleSelect = (id: number, checked: boolean) => {
+    if (checked) {
+      setSelectedIds(prev => [...prev, id])
+    } else {
+      setSelectedIds(prev => prev.filter(v => v !== id))
+    }
+  }
+
+  const handleBatchApply = async () => {
+    if (selectedIds.length === 0) {
+      alert("请先勾选岗位")
+      return
+    }
+    if (!confirm(`确定要一键投递选中的 ${selectedIds.length} 个岗位吗？`)) return
+    try {
+      setApplying(true)
+      const res = await authedFetch('/api/boss/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobIds: selectedIds })
+      })
+      const data = await res.json()
+      if (data.success) {
+        alert("投递任务已启动！")
+        setSelectedIds([]) // 清空选中
+        await loadList(page, size)
+      } else {
+        alert(data.message || "启动投递失败")
+      }
+    } catch (e) {
+      console.error(e)
+      alert("请求异常")
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  const handleDiscard = async (id: number) => {
+    if (!confirm("确定要废弃该岗位吗？")) return
+    try {
+      setDiscardingId(id)
+      const res = await authedFetch(`/api/boss/jobs/${id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: '废弃' })
+      })
+      const data = await res.json()
+      if (data.success) {
+        setItems(prev => prev.map(it => it.id === id ? { ...it, deliveryStatus: '废弃' } : it))
+      } else {
+        alert(data.message || "废弃失败")
+      }
+    } catch (e) {
+      console.error(e)
+      alert("请求异常")
+    } finally {
+      setDiscardingId(null)
+    }
+  }
+
   // 查看全文弹窗
   const [showTextDialog, setShowTextDialog] = useState(false)
   const [textDialogTitle, setTextDialogTitle] = useState<string>("")
@@ -767,39 +839,37 @@ export default function AnalysisContent({ showHeader = false }: { showHeader?: b
       {/* 列表 */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2"><BiBriefcase /> 岗位数据</CardTitle>
-          <CardDescription>支持筛选、导出与刷新</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2"><BiBriefcase /> 岗位数据</CardTitle>
+              <CardDescription>支持筛选、导出与刷新</CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              {selectedIds.length > 0 && (
+                <Button onClick={handleBatchApply} disabled={applying}>
+                  {applying ? "启动中..." : `一键投递 (${selectedIds.length})`}
+                </Button>
+              )}
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="max-w-full overflow-x-auto rounded-lg border border-border shadow-sm">
-            <table className="w-full table-fixed min-w-[1200px] bg-white dark:bg-blacksection">
+            <table className="w-full table-fixed min-w-[600px] bg-white dark:bg-blacksection">
               <thead>
                 <tr className="border-b border-border bg-muted/70">
-                  <th className="w-40 px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">公司名称</th>
-                  <th className="w-48 px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">岗位名称</th>
-                  <th className="w-24 px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">薪资</th>
-                  <th className="w-24 px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">地点</th>
-                  <th className="w-24 px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">经验</th>
-                  <th className="w-20 px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">学历</th>
-                  <th className="w-28 px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">HR</th>
-                  <th className="w-32 px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">HR职位</th>
-                  <th className="w-32 px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">HR活跃</th>
-                  <th className="w-24 px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">投递状态</th>
-                  <th className="w-24 px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">招聘状态</th>
-                  <th className="w-16 px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">链接</th>
-                  <th className="w-48 px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">公司地址</th>
-                  <th className="w-28 px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">行业</th>
-                  <th className="w-28 px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">公司规模</th>
-                  <th className="w-28 px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">融资阶段</th>
-                  <th className="w-48 px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">公司介绍</th>
-                  <th className="w-48 px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">岗位描述</th>
-                  <th className="w-28 px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200">创建时间</th>
+                  <th className="w-12 px-4 py-3.5 text-center text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">
+                    <input type="checkbox" onChange={handleSelectAll} checked={items.length > 0 && selectedIds.length === items.length} />
+                  </th>
+                  <th className="px-4 py-3.5 text-left text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">职位信息</th>
+                  <th className="w-24 px-4 py-3.5 text-center text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">投递状态</th>
+                  <th className="w-24 px-4 py-3.5 text-center text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">操作</th>
                 </tr>
               </thead>
               <tbody>
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={19} className="px-4 py-12 text-center text-muted-foreground bg-gray-50 dark:bg-gray-900/20">
+                    <td colSpan={21} className="px-4 py-12 text-center text-muted-foreground bg-gray-50 dark:bg-gray-900/20">
                       <div className="flex flex-col items-center gap-3">
                         <BiBriefcase className="text-4xl text-gray-300 dark:text-gray-600" />
                         <p className="text-sm">暂无数据</p>
@@ -816,66 +886,37 @@ export default function AnalysisContent({ showHeader = false }: { showHeader?: b
                           : 'bg-gray-50/50 dark:bg-gray-900/20 hover:bg-blue-50/50 dark:hover:bg-blue-950/20'
                       }`}
                     >
-                      <td className="px-4 py-3 text-sm leading-6 align-top border-r border-gray-200 dark:border-gray-700">
-                        <div className="truncate cursor-pointer hover:text-primary transition-colors" title={it.companyName || '-'} onClick={() => openTextDialog("公司名称", it.companyName)}>{it.companyName || '-'}</div>
+                      <td className="px-4 py-3 text-center align-top border-r border-gray-200 dark:border-gray-700">
+                        <input type="checkbox" checked={selectedIds.includes(it.id)} onChange={e => handleSelect(it.id, e.target.checked)} />
                       </td>
                       <td className="px-4 py-3 text-sm leading-6 align-top border-r border-gray-200 dark:border-gray-700">
-                        <div className="truncate cursor-pointer hover:text-primary transition-colors" title={it.jobName || '-'} onClick={() => openTextDialog("岗位名称", it.jobName)}>{it.jobName || '-'}</div>
+                        <div className="font-semibold text-primary">{it.jobName || '-'} <span className="text-red-500 mx-2">{it.salary || '-'}</span></div>
+                        <div className="text-muted-foreground mt-1 text-xs">
+                          {it.location || '-'} | {it.experience || '-'} | {it.degree || '-'}
+                        </div>
+                        <div className="text-muted-foreground mt-1 text-xs">
+                          {it.companyName || '-'} | {it.companyScale || '-'} | {it.financingStage || '-'} | {it.industry || '-'}
+                        </div>
+                        <div className="text-muted-foreground mt-1 text-xs">
+                          HR: {it.hrName || '-'} ({it.hrPosition || '-'}) | 活跃度: <span className="text-orange-500">{it.hrActiveStatus || '-'}</span>
+                        </div>
+                        <div className="flex gap-2 mt-2">
+                           {it.jobUrl && <a href={it.jobUrl} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline text-xs">职位详情</a>}
+                           {it.companyAddress && <span className="text-gray-500 text-xs">地址: {it.companyAddress}</span>}
+                        </div>
                       </td>
-                      <td className="px-4 py-3 text-sm leading-6 whitespace-nowrap align-top border-r border-gray-200 dark:border-gray-700">
-                        <div className="truncate cursor-pointer hover:text-primary transition-colors" title={it.salary || '-'} onClick={() => openTextDialog("薪资", it.salary)}>{it.salary || '-'}</div>
+                      <td className="px-4 py-3 text-center whitespace-nowrap align-middle border-r border-gray-200 dark:border-gray-700">
+                        <span className={badgeClass("delivery", it.deliveryStatus)} title={it.deliveryStatus}>{it.deliveryStatus || "-"}</span>
                       </td>
-                      <td className="px-4 py-3 text-sm leading-6 whitespace-nowrap align-top border-r border-gray-200 dark:border-gray-700">
-                        <div className="truncate cursor-pointer hover:text-primary transition-colors" title={it.location || '-'} onClick={() => openTextDialog("地点", it.location)}>{it.location || '-'}</div>
-                      </td>
-                      <td className="px-4 py-3 text-sm leading-6 whitespace-nowrap align-top border-r border-gray-200 dark:border-gray-700">
-                        <div className="truncate cursor-pointer hover:text-primary transition-colors" title={it.experience || '-'} onClick={() => openTextDialog("经验", it.experience)}>{it.experience || '-'}</div>
-                      </td>
-                      <td className="px-4 py-3 text-sm leading-6 whitespace-nowrap align-top border-r border-gray-200 dark:border-gray-700">
-                        <div className="truncate cursor-pointer hover:text-primary transition-colors" title={it.degree || '-'} onClick={() => openTextDialog("学历", it.degree)}>{it.degree || '-'}</div>
-                      </td>
-                      <td className="px-4 py-3 text-sm leading-6 align-top border-r border-gray-200 dark:border-gray-700">
-                        <div className="truncate cursor-pointer hover:text-primary transition-colors" title={it.hrName || '-'} onClick={() => openTextDialog("HR", it.hrName)}>{it.hrName || '-'}</div>
-                      </td>
-                      <td className="px-4 py-3 text-sm leading-6 align-top border-r border-gray-200 dark:border-gray-700">
-                        <div className="truncate cursor-pointer hover:text-primary transition-colors" title={it.hrPosition || '-'} onClick={() => openTextDialog("HR职位", it.hrPosition)}>{it.hrPosition || '-'}</div>
-                      </td>
-                      <td className="px-4 py-3 text-sm leading-6 whitespace-nowrap align-top border-r border-gray-200 dark:border-gray-700">
-                        <button className={badgeClass("hr", it.hrActiveStatus)} title={it.hrActiveStatus} onClick={() => openTextDialog("HR活跃", it.hrActiveStatus)}>{it.hrActiveStatus || "-"}</button>
-                      </td>
-                      <td className="px-4 py-3 text-sm leading-6 whitespace-nowrap align-top border-r border-gray-200 dark:border-gray-700">
-                        <button className={badgeClass("delivery", it.deliveryStatus)} title={it.deliveryStatus} onClick={() => openTextDialog("投递状态", it.deliveryStatus)}>{it.deliveryStatus || "-"}</button>
-                      </td>
-                      <td className="px-4 py-3 text-sm leading-6 whitespace-nowrap align-top border-r border-gray-200 dark:border-gray-700">
-                        <button className={badgeClass("recruitment", it.recruitmentStatus)} title={it.recruitmentStatus} onClick={() => openTextDialog("招聘状态", it.recruitmentStatus)}>{it.recruitmentStatus || "-"}</button>
-                      </td>
-                      <td className="px-4 py-3 text-sm leading-6 whitespace-nowrap align-top border-r border-gray-200 dark:border-gray-700">
-                        {it.jobUrl ? (
-                          <a href={it.jobUrl} className="text-primary underline hover:text-primary/80 transition-colors" target="_blank" rel="noreferrer">链接</a>
-                        ) : (
-                          "-"
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-sm leading-6 align-top border-r border-gray-200 dark:border-gray-700">
-                        <div className="truncate cursor-pointer hover:text-primary transition-colors" title={it.companyAddress || '-'} onClick={() => openTextDialog("公司地址", it.companyAddress)}>{it.companyAddress || '-'}</div>
-                      </td>
-                      <td className="px-4 py-3 text-sm leading-6 align-top border-r border-gray-200 dark:border-gray-700">
-                        <div className="truncate cursor-pointer hover:text-primary transition-colors" title={it.industry || '-'} onClick={() => openTextDialog("行业", it.industry)}>{it.industry || '-'}</div>
-                      </td>
-                      <td className="px-4 py-3 text-sm leading-6 align-top border-r border-gray-200 dark:border-gray-700">
-                        <div className="truncate cursor-pointer hover:text-primary transition-colors" title={it.companyScale || '-'} onClick={() => openTextDialog("公司规模", it.companyScale)}>{it.companyScale || '-'}</div>
-                      </td>
-                      <td className="px-4 py-3 text-sm leading-6 align-top border-r border-gray-200 dark:border-gray-700">
-                        <div className="truncate cursor-pointer hover:text-primary transition-colors" title={it.financingStage || '-'} onClick={() => openTextDialog("融资阶段", it.financingStage)}>{it.financingStage || '-'}</div>
-                      </td>
-                      <td className="px-4 py-3 text-sm leading-6 align-top border-r border-gray-200 dark:border-gray-700">
-                        <div className="truncate cursor-pointer hover:text-primary transition-colors" title={it.introduce || '-'} onClick={() => openTextDialog("公司介绍", it.introduce)}>{it.introduce || '-'}</div>
-                      </td>
-                      <td className="px-4 py-3 text-sm leading-6 align-top border-r border-gray-200 dark:border-gray-700">
-                        <div className="truncate cursor-pointer hover:text-primary transition-colors" title={it.jobDescription || '-'} onClick={() => openTextDialog("岗位描述", it.jobDescription)}>{it.jobDescription || '-'}</div>
-                      </td>
-                      <td className="px-4 py-3 text-sm leading-6 whitespace-nowrap align-top">
-                        <div className="truncate cursor-pointer hover:text-primary transition-colors" title={formatDateOnly(it.createdAt) || '-'} onClick={() => openTextDialog("创建时间", formatDateOnly(it.createdAt))}>{formatDateOnly(it.createdAt) || '-'}</div>
+                      <td className="px-4 py-3 text-center align-middle border-l border-gray-200 dark:border-gray-700">
+                        <div className="flex flex-col gap-2 items-center">
+                          <Button variant="destructive" size="sm" className="w-20" onClick={() => handleDiscard(it.id)} disabled={discardingId === it.id}>
+                            {discardingId === it.id ? "废弃中" : "废弃"}
+                          </Button>
+                          <Button variant="outline" size="sm" className="w-20 text-blue-600 border-blue-600 hover:bg-blue-50" onClick={() => {}}>
+                            一键投递
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))

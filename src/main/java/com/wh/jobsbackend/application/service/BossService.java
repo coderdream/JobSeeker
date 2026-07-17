@@ -10,7 +10,9 @@ import com.wh.jobsbackend.worker.utils.Constant;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import com.wh.jobsbackend.application.security.CurrentUserService;
 
+import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
@@ -34,8 +36,9 @@ public class BossService {
     private final BossConfigMapper bossConfigMapper;
     private final BlacklistMapper blacklistMapper;
     private final BossJobDataMapper bossJobDataMapper;
-    private final javax.sql.DataSource dataSource;
+    private final DataSource dataSource;
     private final ReferenceDataService referenceDataService;
+    private final CurrentUserService currentUserService;
 
     // ==================== Option相关方法 ====================
 
@@ -180,8 +183,11 @@ public class BossService {
     /**
      * 获取第一条配置（通常只有一条）
      */
-    public BossConfigEntity getFirstConfig() {
+    public BossConfigEntity getFirstConfig(Long userId) {
         QueryWrapper<BossConfigEntity> wrapper = new QueryWrapper<>();
+        if (userId != null) {
+            wrapper.eq("user_id", userId);
+        }
         wrapper.last("LIMIT 1");
         return bossConfigMapper.selectOne(wrapper);
     }
@@ -210,12 +216,13 @@ public class BossService {
      * - 若表中已有记录：合并非空字段并更新该记录
      * - 若表为空：插入新记录
      */
-    public BossConfigEntity saveOrUpdateFirstSelective(BossConfigEntity partial) {
-        BossConfigEntity existing = getFirstConfig();
+    public BossConfigEntity saveOrUpdateFirstSelective(Long userId, BossConfigEntity partial) {
+        BossConfigEntity existing = getFirstConfig(userId);
         LocalDateTime now = LocalDateTime.now();
 
         if (existing == null) {
             // 表为空，插入新记录
+            partial.setUserId(userId);
             partial.setCreatedAt(now);
             partial.setUpdatedAt(now);
             bossConfigMapper.insert(partial);
@@ -264,8 +271,9 @@ public class BossService {
      * 从配置文件和数据库加载完整的Boss配置
      */
     public BossConfig loadBossConfig() {
+        Long userId = currentUserService.requireUserId();
         // 直接从数据库 hub_boss_config 加载，并将括号列表解析为集合
-        BossConfigEntity entity = getFirstConfig();
+        BossConfigEntity entity = getFirstConfig(userId);
         BossConfig config = new BossConfig();
 
         if (entity == null) {
@@ -663,6 +671,26 @@ public class BossService {
             uw.eq("encrypt_user_id", encryptUserId);
         }
         bossJobDataMapper.update(update, uw);
+    }
+
+    /**
+     * 按主键 id 更新投递状态
+     */
+    public void updateDeliveryStatusById(Long id, String status) {
+        if (id == null || status == null) return;
+        BossJobDataEntity update = new BossJobDataEntity();
+        update.setId(id);
+        update.setDeliveryStatus(status);
+        update.setUpdatedAt(LocalDateTime.now());
+        bossJobDataMapper.updateById(update);
+    }
+
+    /**
+     * 按主键 id 查询岗位
+     */
+    public BossJobDataEntity findById(Long id) {
+        if (id == null) return null;
+        return bossJobDataMapper.selectById(id);
     }
 
     // ==================== 投递分析（Dashboard）相关方法 ====================

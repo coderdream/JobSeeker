@@ -40,6 +40,7 @@ class UserScopedSseControllerTest {
 
         MockMvc mockMvc = standaloneSetup(new BossController(
                 mock(BossJobService.class),
+                mock(com.wh.jobsbackend.application.service.BossService.class),
                 mock(PlaywrightManager.class),
                 mock(CookieService.class),
                 currentUserService,
@@ -64,6 +65,7 @@ class UserScopedSseControllerTest {
 
         MockMvc mockMvc = standaloneSetup(new BossController(
                 bossJobService,
+                mock(com.wh.jobsbackend.application.service.BossService.class),
                 playwrightManager,
                 mock(CookieService.class),
                 currentUserService,
@@ -92,6 +94,7 @@ class UserScopedSseControllerTest {
 
         MockMvc mockMvc = standaloneSetup(new BossController(
                 bossJobService,
+                mock(com.wh.jobsbackend.application.service.BossService.class),
                 playwrightManager,
                 mock(CookieService.class),
                 currentUserService,
@@ -114,6 +117,7 @@ class UserScopedSseControllerTest {
 
         MockMvc mockMvc = standaloneSetup(new BossController(
                 mock(BossJobService.class),
+                mock(com.wh.jobsbackend.application.service.BossService.class),
                 playwrightManager,
                 mock(CookieService.class),
                 currentUserService,

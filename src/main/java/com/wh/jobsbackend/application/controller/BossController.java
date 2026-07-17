@@ -1,5 +1,6 @@
 package com.wh.jobsbackend.application.controller;
 
+import com.wh.jobsbackend.application.service.BossService;
 import com.wh.jobsbackend.application.stream.ProgressStreamService;
 import com.wh.jobsbackend.application.service.CookieService;
 import com.wh.jobsbackend.application.security.CurrentUserService;
@@ -31,6 +32,7 @@ public class BossController {
     private static final String BOSS_PROGRESS_TOPIC = "boss-progress";
 
     private final BossJobService bossJobService;
+    private final BossService bossService;
     private final PlaywrightManager playwrightManager;
     private final CookieService cookieService;
     private final CurrentUserService currentUserService;
@@ -201,6 +203,79 @@ public class BossController {
 
     private void sendBossProgress(Long userId, JobProgressMessage message) {
         progressStreamService.publish(userId, BOSS_PROGRESS_TOPIC, "progress", message);
+    }
+
+    /** POST - 一键投递：对前端勾选的岗位 id 列表发起投递 */
+    @PostMapping("/apply")
+    public ResponseEntity<Map<String, Object>> applyJobs(@org.springframework.web.bind.annotation.RequestBody Map<String, Object> body) {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            Long userId = currentUserService.requireUserId();
+            if (!playwrightManager.isLoggedIn(userId, "boss")) {
+                response.put("success", false);
+                response.put("message", "请先登录Boss直聘");
+                return ResponseEntity.badRequest().body(response);
+            }
+            @SuppressWarnings("unchecked")
+            java.util.List<Integer> rawIds = (java.util.List<Integer>) body.get("jobIds");
+            if (rawIds == null || rawIds.isEmpty()) {
+                response.put("success", false);
+                response.put("message", "jobIds 不能为空");
+                return ResponseEntity.badRequest().body(response);
+            }
+            java.util.List<Long> jobIds = rawIds.stream().map(i -> i.longValue()).collect(java.util.stream.Collectors.toList());
+            // 从数据库加载岗位信息
+            java.util.List<com.wh.jobsbackend.application.entity.BossJobDataEntity> jobs = jobIds.stream()
+                    .map(bossService::findById)
+                    .filter(e -> e != null && e.getJobUrl() != null && !e.getJobUrl().isBlank())
+                    .collect(java.util.stream.Collectors.toList());
+            if (jobs.isEmpty()) {
+                response.put("success", false);
+                response.put("message", "没有找到有效的岗位（jobUrl 不能为空）");
+                return ResponseEntity.badRequest().body(response);
+            }
+            // 先把所有岗位状态改为"投递中"
+            jobs.forEach(e -> bossService.updateDeliveryStatusById(e.getId(), "投递中"));
+
+            // 异步执行投递
+            taskExecutor.execute(() -> bossJobService.applySpecificJobs(userId, jobs, pm -> sendBossProgress(userId, pm)));
+
+            response.put("success", true);
+            response.put("message", String.format("已启动投递，共 %d 个岗位", jobs.size()));
+            response.put("count", jobs.size());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("一键投递失败", e);
+            response.put("success", false);
+            response.put("message", "一键投递失败: " + e.getMessage());
+            return ResponseEntity.internalServerError().body(response);
+        }
+    }
+
+    /** PATCH - 更新单条岗位状态（废弃等） */
+    @org.springframework.web.bind.annotation.PatchMapping("/jobs/{id}/status")
+    public ResponseEntity<Map<String, Object>> updateJobStatus(
+            @PathVariable Long id,
+            @org.springframework.web.bind.annotation.RequestBody Map<String, String> body) {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            currentUserService.requireUserId(); // 仅做认证校验
+            String status = body.get("status");
+            if (status == null || status.isBlank()) {
+                response.put("success", false);
+                response.put("message", "status 字段不能为空");
+                return ResponseEntity.badRequest().body(response);
+            }
+            bossService.updateDeliveryStatusById(id, status);
+            response.put("success", true);
+            response.put("message", "状态已更新为：" + status);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("更新岗位状态失败 id={}", id, e);
+            response.put("success", false);
+            response.put("message", "更新失败: " + e.getMessage());
+            return ResponseEntity.internalServerError().body(response);
+        }
     }
 
     /** 心跳 - Boss进度 SSE */

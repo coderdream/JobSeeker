@@ -13,6 +13,8 @@ public class BossConfigEntity {
     @TableId(type = IdType.AUTO)
     /** 主键ID */
     private Long id;
+    /** 用户ID */
+    private Long userId;
     /** 调试模式（1=开启，0=关闭） */
     private Integer debugger;
     /** 页面操作等待时间（秒） */

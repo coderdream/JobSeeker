@@ -1,12 +1,14 @@
 spring:
   datasource:
-    url: ${DB_URL:jdbc:postgresql://127.0.0.1:5432/jobs_backend}
-    username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:postgres}
-    driver-class-name: org.postgresql.Driver
+    url: ${DB_URL:jdbc:sqlite:db/getjobs.db}
+    username: ${DB_USERNAME:}
+    password: ${DB_PASSWORD:}
+    driver-class-name: org.sqlite.JDBC
     hikari:
       maximum-pool-size: 10
       connection-test-query: SELECT 1
+  flyway:
+    locations: classpath:db/sqlite
 
 logging:
   level:

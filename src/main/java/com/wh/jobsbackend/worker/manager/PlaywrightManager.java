@@ -151,13 +151,13 @@ public class PlaywrightManager {
             // 创建浏览器实例，使用固定CDP端口7866，最大化启动
             browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
                     .setHeadless(false) // 非无头模式，可视化调试
+                    .setIgnoreDefaultArgs(List.of("--enable-automation")) // 禁用自动化提示，防止被强力反爬检测
                     .setSlowMo(50) // 放慢操作速度，便于调试
                     .setChannel("chrome")
                     .setArgs(List.of(
                             "--disable-blink-features=AutomationControlled",
                             "--disable-infobars",
                             "--no-first-run",
-                            "--remote-debugging-port=" + CDP_PORT, // 使用固定CDP端口
                             "--start-maximized" // 最大化启动窗口
                     )));
             userAutomationRegistry = new UserAutomationRegistry(userId -> new UserAutomationSession(userId, browser, false));
@@ -253,6 +253,7 @@ public class PlaywrightManager {
                     .setViewportSize(null)
                     .setLocale("zh-CN")
                     .setTimezoneId("Asia/Shanghai")
+                    .setIgnoreDefaultArgs(List.of("--enable-automation")) // <--- 重点：移除自动化横幅和标志
                     .setExtraHTTPHeaders(extraHeadersForPlatform("boss"))
                     .setUserAgent(windowsChromeUserAgent(session.getBrowser()))
                     .setArgs(List.of(

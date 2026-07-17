@@ -11,15 +11,19 @@ import org.springframework.web.bind.annotation.*;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import com.wh.jobsbackend.application.security.CurrentUserService;
+
 @RestController
 @CrossOrigin(origins = "*")
 @RequestMapping("/api/boss/config")
 public class BossConfigController {
 
     private final BossService bossService;
+    private final CurrentUserService currentUserService;
 
-    public BossConfigController(BossService bossService) {
+    public BossConfigController(BossService bossService, CurrentUserService currentUserService) {
         this.bossService = bossService;
+        this.currentUserService = currentUserService;
     }
 
     /**
@@ -30,9 +34,13 @@ public class BossConfigController {
         Map<String, Object> result = new HashMap<>();
 
         // 获取配置
-        BossConfigEntity config = bossService.getFirstConfig();
+        Long userId = currentUserService.requireUserId();
+        BossConfigEntity config = bossService.getFirstConfig(userId);
         if (config == null) {
             config = new BossConfigEntity();
+            config.setKeywords("[\"Java\"]");
+            config.setCityCode("武汉");
+            config.setFilterDeadHr(1);
         }
 
         // 获取所有选项并按类型分组
@@ -113,7 +121,8 @@ public class BossConfigController {
         if (config.getId() != null) {
             return bossService.updateConfig(config);
         }
-        return bossService.saveOrUpdateFirstSelective(config);
+        Long userId = currentUserService.requireUserId();
+        return bossService.saveOrUpdateFirstSelective(userId, config);
   }
 
     /**
