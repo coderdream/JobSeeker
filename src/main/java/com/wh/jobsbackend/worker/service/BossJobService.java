@@ -44,21 +44,15 @@ public class BossJobService extends AbstractPlatformJobService {
 
     @Override
     protected void doExecute(Long userId, Consumer<JobProgressMessage> progressCallback) {
-        playwrightManager.withPlaywrightLock(() -> {
-        Page page = playwrightManager.getPage(userId, PLATFORM);
-        if (page == null) {
-            throw new PlatformPageModelException("Boss页面未初始化");
-        }
-
         if (!playwrightManager.isLoggedIn(userId, PLATFORM)) {
             throw new PlatformPageModelException("请先登录Boss直聘");
         }
 
-        playwrightManager.pauseBossMonitoring();
         try {
-            BossConfig config = configService.getBossConfig();
+            long startTime = System.currentTimeMillis();
+            BossConfig config = configService.getBossConfig(userId);
             progressCallback.accept(JobProgressMessage.info(PLATFORM, "配置加载成功"));
-            progressCallback.accept(JobProgressMessage.info(PLATFORM, "开始投递任务..."));
+            progressCallback.accept(JobProgressMessage.info(PLATFORM, "开始抓取职位列表..."));
 
             Boss.ProgressCallback callback = (message, current, total) -> {
                 if (current != null && total != null) {
@@ -69,24 +63,28 @@ public class BossJobService extends AbstractPlatformJobService {
             };
 
             Boss boss = bossProvider.getObject();
-            boss.setPage(page);
             boss.setConfig(config);
+            boss.setUserId(userId);
             boss.setProgressCallback(callback);
             boss.setShouldStopCallback(() -> shouldStop(userId));
             boss.prepare();
 
             int deliveredCount = boss.execute();
+            long elapsed = System.currentTimeMillis() - startTime;
+            long hours = elapsed / 3600000;
+            long minutes = (elapsed % 3600000) / 60000;
+            double seconds = (elapsed % 60000) / 1000.0;
+            String timeStr = hours > 0 
+                    ? String.format("%d时%d分%.3f秒", hours, minutes, seconds)
+                    : (minutes > 0 ? String.format("%d分%.3f秒", minutes, seconds) : String.format("%.3f秒", seconds));
+
             progressCallback.accept(JobProgressMessage.success(
                     PLATFORM,
-                    String.format("\u6295\u9012\u4efb\u52a1\u5b8c\u6210\uff0c\u5171\u53d1\u8d77%d\u4e2a\u804a\u5929", deliveredCount)
+                    String.format("抓取任务完成，共抓取 %d 个岗位，耗时 %s", deliveredCount, timeStr)
             ));
-        } finally {
-            try {
-                playwrightManager.resumeBossMonitoring();
-            } catch (Exception ignored) {
-            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
-        });
     }
 
     /**
@@ -115,7 +113,9 @@ public class BossJobService extends AbstractPlatformJobService {
 
                 Boss boss = bossProvider.getObject();
                 boss.setPage(page);
-                boss.setConfig(configService.getBossConfig());
+                BossConfig config = configService.getBossConfig(userId);
+                boss.setConfig(config);
+                boss.setUserId(userId);
                 boss.setProgressCallback(callback);
                 boss.setShouldStopCallback(() -> shouldStop(userId));
                 boss.prepare();
@@ -130,14 +130,19 @@ public class BossJobService extends AbstractPlatformJobService {
                     BossJobDataEntity job = jobs.get(i);
                     progressCallback.accept(JobProgressMessage.progress(PLATFORM, "正在投递: " + job.getJobName(), i + 1, total));
                     try {
-                        boss.applyJobByUrl(
+                        String result = boss.applyJobByUrl(
                                 job.getId(),
                                 job.getJobUrl(),
-                                job.getJobName(),
                                 job.getCompanyName(),
-                                configService.getBossConfig().getSayHi()
+                                job.getJobName(),
+                                config.getSayHi()
                         );
-                        successCount++;
+                        if ("已投递".equals(result)) {
+                            successCount++;
+                        } else {
+                            progressCallback.accept(JobProgressMessage.info(PLATFORM,
+                                    "岗位投递失败: " + job.getJobName()));
+                        }
                     } catch (Exception e) {
                         progressCallback.accept(JobProgressMessage.info(PLATFORM, "岗位投递失败: " + job.getJobName() + " - " + e.getMessage()));
                     }
@@ -150,5 +155,36 @@ public class BossJobService extends AbstractPlatformJobService {
                 }
             }
         });
+    }
+
+    /**
+     * 批量获取指定岗位详情
+     */
+    public void fetchSpecificJobDetails(Long userId, List<BossJobDataEntity> jobs, Consumer<JobProgressMessage> progressCallback) {
+        if (!playwrightManager.isLoggedIn(userId, PLATFORM)) {
+            throw new PlatformPageModelException("请先登录Boss直聘");
+        }
+
+        try {
+            progressCallback.accept(JobProgressMessage.info(PLATFORM, "开始批量获取选定岗位详情..."));
+            Boss.ProgressCallback callback = (message, current, total) -> {
+                if (current != null && total != null) {
+                    progressCallback.accept(JobProgressMessage.progress(PLATFORM, message, current, total));
+                } else {
+                    progressCallback.accept(JobProgressMessage.info(PLATFORM, message));
+                }
+            };
+            Boss boss = bossProvider.getObject();
+            boss.setUserId(userId);
+            BossConfig config = configService.getBossConfig(userId);
+            boss.setConfig(config);
+            boss.setProgressCallback(callback);
+            boss.setShouldStopCallback(() -> shouldStop(userId));
+            boss.prepare();
+
+            boss.fetchJobDetails(jobs);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }

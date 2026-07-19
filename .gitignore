@@ -14,3 +14,9 @@ target/
 # OS
 .DS_Store
 Thumbs.db
+
+# Frontend
+front/node_modules/
+front/.next/
+front/out/
+.scratch/

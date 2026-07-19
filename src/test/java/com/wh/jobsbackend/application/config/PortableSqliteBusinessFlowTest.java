@@ -132,16 +132,16 @@ class PortableSqliteBusinessFlowTest {
         bossConfig.setCityCode("[\"北京\"]");
         bossConfig.setSalary("[\"10-20K\"]");
         BossConfigEntity savedConfig = bossService.saveOrUpdateFirstSelective(1L, bossConfig);
-        assertDoesNotThrow(() -> bossService.getOptionsByType("salary"));
-        assertDoesNotThrow(bossService::loadBossConfig);
+        assertDoesNotThrow(() -> { bossService.getOptionsByType("salary"); });
+        assertDoesNotThrow(() -> { bossService.loadBossConfig(); });
 
         Job51ConfigEntity job51Config = new Job51ConfigEntity();
         job51Config.setKeywords("[\"Java\"]");
         job51Config.setJobArea("[\"北京\"]");
         job51Config.setSalary("[\"10-20K\"]");
         assertNotNull(job51Service.updateConfig(job51Config));
-        assertDoesNotThrow(() -> job51Service.getOptionsByType("salary"));
-        assertDoesNotThrow(job51Service::loadJob51Config);
+        assertDoesNotThrow(() -> { job51Service.getOptionsByType("salary"); });
+        assertDoesNotThrow(() -> { job51Service.loadJob51Config(); });
 
         LiepinConfigEntity liepinConfig = new LiepinConfigEntity();
         liepinConfig.setKeywords("[\"Java\"]");
@@ -156,8 +156,8 @@ class PortableSqliteBusinessFlowTest {
         zhilianConfig.setCityCode("北京");
         zhilianConfig.setSalary("10000,15000");
         assertNotNull(zhilianService.updateConfig(zhilianConfig));
-        assertDoesNotThrow(() -> zhilianService.getOptionsByType("salary"));
-        assertDoesNotThrow(zhilianService::loadZhilianConfig);
+        assertDoesNotThrow(() -> { zhilianService.getOptionsByType("salary"); });
+        assertDoesNotThrow(() -> { zhilianService.loadZhilianConfig(); });
 
         YupaoConfigEntity yupaoConfig = new YupaoConfigEntity();
         yupaoConfig.setKeywords("[\"Java\"]");
@@ -165,8 +165,8 @@ class PortableSqliteBusinessFlowTest {
         yupaoConfig.setSalary("5-8K");
         yupaoConfig.setJobType("fulltime");
         assertNotNull(yupaoService.updateConfig(yupaoConfig));
-        assertDoesNotThrow(() -> yupaoService.getOptionsByType("salary"));
-        assertDoesNotThrow(yupaoService::loadYupaoConfig);
+        assertDoesNotThrow(() -> { yupaoService.getOptionsByType("salary"); });
+        assertDoesNotThrow(() -> { yupaoService.loadYupaoConfig(); });
     }
 
     private void authenticate(Long userId, String username) {

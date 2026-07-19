@@ -553,4 +553,9 @@ public class ZhilianService {
     }
 
     private static String nullSafe(String s) { return s == null ? "" : s.trim(); }
+
+    public ZhilianConfig loadZhilianConfig(Long userId) {
+        return loadZhilianConfig();
+    }
+
 }

@@ -44,6 +44,13 @@ import static com.wh.jobsbackend.worker.boss.Locators.*;
  * "https://github.com/loks666/get_jobs">https://github.com/loks666/get_jobs</a>
  * Boss直聘自动投递
  */
+import com.wh.jobsbackend.application.service.CookieService;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
+
 @Slf4j
 @Component
 @Scope("prototype")
@@ -54,8 +61,13 @@ public class Boss {
     private Page page;
     @Setter
     private BossConfig config;
+    @Setter
+    private Long userId;
+
     private final BossService bossService;
     private final AiService aiService;
+    private final CookieService cookieService;
+    private final RestTemplate restTemplate = new RestTemplate();
     private Set<String> blackCompanies;
     private Set<String> blackRecruiters;
     private Set<String> blackJobs;
@@ -94,6 +106,8 @@ public class Boss {
         // 不在页面初始化阶段入库，仅用于后续点击卡片时按需入库
     }
 
+    private int totalScraped = 0;
+
     /**
      * 执行投递
      */
@@ -109,7 +123,7 @@ public class Boss {
                 break;
             }
         }
-        return resultList.size();
+        return totalScraped > 0 ? totalScraped : resultList.size();
     }
 
     /**
@@ -124,12 +138,16 @@ public class Boss {
             log.warn("applyJobByUrl: 岗位 URL 为空，跳过 | jobId={}", jobId);
             return "投递失败";
         }
-        Page detailPage = page.context().newPage();
+        
+        Page detailPage = page; // Use the main page directly instead of newPage()
+        boolean success = false;
         try {
             detailPage.navigate(jobUrl, new Page.NavigateOptions()
-                    .setWaitUntil(WaitUntilState.DOMCONTENTLOADED)
+                    .setWaitUntil(com.microsoft.playwright.options.WaitUntilState.DOMCONTENTLOADED)
                     .setTimeout(30_000));
             PlaywrightUtil.sleep(3);
+            
+            log.info("detailPage current URL after navigate: {}", detailPage.url());
 
             Job job = new Job();
             job.setJobName(jobName);
@@ -137,21 +155,17 @@ public class Boss {
             job.setCompanyName(companyName);
             job.setJobInfo("");
 
-            // 注册 encryptId -> encryptUserId 映射（从页面拦截已有则直接用）
-            // 这里利用已有的 interceptDetailResponse 机制（Boss 在 postJobByCity 启动时注册了响应拦截器）
-            // 对于一键投递，我们直接通过 URL 提取 encryptId，encryptUserId 可能缺失
+            // 注册 encryptId -> encryptUserId 映射
             String encryptId = extractEncryptId(jobUrl);
             if (encryptId != null) {
-                // 尝试从 bossService 数据库中取 encryptUserId（由之前抓取时入库）
                 com.wh.jobsbackend.application.entity.BossJobDataEntity entity = bossService.findById(jobId);
                 if (entity != null && entity.getEncryptUserId() != null) {
                     encryptIdToUserId.put(encryptId, entity.getEncryptUserId());
                 }
             }
 
-            boolean success = resumeSubmission(detailPage, jobName, job);
+            success = resumeSubmission(detailPage, jobName, job);
             if (success) {
-                // 按主键更新状态
                 bossService.updateDeliveryStatusById(jobId, "已投递");
                 return "已投递";
             } else {
@@ -163,7 +177,78 @@ public class Boss {
             try { bossService.updateDeliveryStatusById(jobId, "投递失败"); } catch (Exception ignored) {}
             return "投递失败";
         } finally {
-            try { detailPage.close(); } catch (Exception ignored) {}
+            // detailPage is the main page now, DO NOT close it.
+        }
+    }
+
+    public void fetchJobDetails(List<com.wh.jobsbackend.application.entity.BossJobDataEntity> jobs) {
+        int total = jobs.size();
+        progressCallback.accept("开始通过Python CDP获取选定岗位详情...", 0, total);
+
+        try {
+            // 写入待抓取的列表
+            java.io.File tempInputFile = java.io.File.createTempFile("boss_details_input_", ".json");
+            tempInputFile.deleteOnExit();
+
+            JSONObject inputRoot = new JSONObject();
+            JSONArray inputJobsArray = new JSONArray();
+            for (com.wh.jobsbackend.application.entity.BossJobDataEntity job : jobs) {
+                JSONObject j = new JSONObject();
+                j.put("job_id", job.getEncryptId());
+                j.put("title", job.getJobName());
+                j.put("boss_name", job.getCompanyName());
+                j.put("job_link", job.getJobUrl());
+                inputJobsArray.put(j);
+            }
+            inputRoot.put("jobs", inputJobsArray);
+            Files.writeString(tempInputFile.toPath(), inputRoot.toString(), StandardCharsets.UTF_8);
+
+            // 输出详情文件
+            java.io.File tempOutputFile = java.io.File.createTempFile("boss_details_output_", ".json");
+            tempOutputFile.deleteOnExit();
+
+            List<String> cmd = new ArrayList<>();
+            cmd.add("D:\\04_GitHub\\boss-zhipin-scraper\\.venv\\Scripts\\python.exe");
+            cmd.add("D:\\04_GitHub\\boss-zhipin-scraper\\scripts\\boss_cdp_raw.py");
+            cmd.add("--input");
+            cmd.add(tempInputFile.getAbsolutePath());
+            cmd.add("--detail");
+            cmd.add("--detail-output");
+            cmd.add(tempOutputFile.getAbsolutePath());
+            cmd.add("--cdp-port");
+            cmd.add("9222");
+
+            executePythonCommand(cmd);
+
+            // 解析输出并更新JD
+            if (tempOutputFile.exists() && tempOutputFile.length() > 0) {
+                String content = Files.readString(tempOutputFile.toPath(), StandardCharsets.UTF_8);
+                JSONArray detailsArray = new JSONArray(content);
+                int successCount = 0;
+                for (int i = 0; i < detailsArray.length(); i++) {
+                    JSONObject d = detailsArray.getJSONObject(i);
+                    String jobLink = d.optString("job_link", "");
+                    String jd = d.optString("jd", "");
+                    if (jd != null && !jd.isEmpty()) {
+                        // 寻找对应ID
+                        for (com.wh.jobsbackend.application.entity.BossJobDataEntity job : jobs) {
+                            if (jobLink.equals(job.getJobUrl())) {
+                                String mockJson = constructMockDetailJson(new JSONObject().put("encryptJobId", job.getEncryptId()), jd);
+                                processJobDetailJsonAndInsert(mockJson);
+                                successCount++;
+                                progressCallback.accept("  ✓ 获取详情成功: " + job.getJobName(), successCount, total);
+                                break;
+                            }
+                        }
+                    }
+                }
+                progressCallback.accept("详情获取任务完成，成功: " + successCount + "/" + total, total, total);
+            } else {
+                progressCallback.accept("详情获取未生成数据", 0, total);
+            }
+        } catch (Exception e) {
+            log.error("详情抓取异常: {}", e.getMessage(), e);
+            progressCallback.accept("详情抓取异常: " + e.getMessage(), 0, total);
         }
     }
 
@@ -269,204 +354,174 @@ public class Boss {
     }
 
     private void postJobByCity(String cityCode) {
-        String searchUrl = getSearchUrl(cityCode);
         for (String keyword : config.getKeywords()) {
-            // 检查是否需要停止
             if (shouldStopCallback != null && Boolean.TRUE.equals(shouldStopCallback.get())) {
-                progressCallback.accept("用户取消投递", 0, 0);
+                progressCallback.accept("用户取消抓取", 0, 0);
                 return;
             }
 
-            int postCount = 0;
-            // 使用 URLEncoder 对关键词进行编码
-            String encodedKeyword = URLEncoder.encode(keyword, StandardCharsets.UTF_8);
+            log.info("开始使用Python CDP抓取职位列表: keyword={}, city={}", keyword, cityCode);
+            progressCallback.accept("开始抓取关键词: " + keyword, 0, 0);
 
-            String url = searchUrl + (searchUrl.contains("?") ? "&" : "?") + "query=" + encodedKeyword;
-            log.info("Boss navigate search: target={}", url);
-            page.navigate(url, new Page.NavigateOptions()
-                    .setWaitUntil(com.microsoft.playwright.options.WaitUntilState.DOMCONTENTLOADED)
-                    .setTimeout(60_000));
-            log.info("Boss navigate search finished: current={}", page.url());
-            
-            // 检测滑块验证
-            waitForSliderVerify(page);
+            try {
+                // 创建临时输出文件
+                java.io.File tempFile = java.io.File.createTempFile("boss_jobs_" + keyword + "_", ".json");
+                tempFile.deleteOnExit();
 
-            // 抓取多页，默认为最多 3 页，可按需拉取
-            int maxPages = 3;
-            List<JSONObject> allJobs = new ArrayList<>();
-            for (int pg = 1; pg <= maxPages; pg++) {
-                if (shouldStopCallback != null && Boolean.TRUE.equals(shouldStopCallback.get())) {
-                    break;
+                List<String> cmd = new ArrayList<>();
+                cmd.add("D:\\04_GitHub\\boss-zhipin-scraper\\.venv\\Scripts\\python.exe");
+                cmd.add("D:\\04_GitHub\\boss-zhipin-scraper\\scripts\\boss_cdp_raw.py");
+                cmd.add("--skip-login-check");
+                cmd.add("--keyword");
+                cmd.add(keyword);
+                cmd.add("--city");
+                cmd.add(cityCode);
+                cmd.add("--pages");
+                cmd.add("3");
+                cmd.add("--no-detail");
+                cmd.add("--output");
+                cmd.add(tempFile.getAbsolutePath());
+                cmd.add("--cdp-port");
+                cmd.add("9222");
+
+                // 添加其他过滤器
+                if (config.getExperience() != null && !config.getExperience().isEmpty()) {
+                    cmd.add("--experience");
+                    cmd.add(config.getExperience().get(0));
                 }
-                log.info("开始拉取第 {}/{} 页职位数据...", pg, maxPages);
-                String apiUrl = buildApiUrl(searchUrl, keyword, pg);
-                String jsonResponse = fetchJobListJson(apiUrl);
-                if (jsonResponse == null || jsonResponse.isBlank()) {
-                    log.warn("第 {} 页 API 未返回数据", pg);
-                    break;
+                if (config.getDegree() != null && !config.getDegree().isEmpty()) {
+                    cmd.add("--degree");
+                    cmd.add(config.getDegree().get(0));
                 }
-
-                JSONObject root = new JSONObject(jsonResponse);
-                if (root.has("error")) {
-                    log.error("拉取第 {} 页失败: {}", pg, root.getString("error"));
-                    break;
+                if (config.getSalary() != null && !config.getSalary().isEmpty()) {
+                    cmd.add("--salary");
+                    cmd.add(config.getSalary().get(0));
                 }
-
-                if (root.has("code") && root.getInt("code") == 31) {
-                    log.warn("拉取被风控限制(code=31)，尝试导航以触发滑块验证...");
-                    page.navigate("https://www.zhipin.com/web/geek/jobs");
-                    waitForSliderVerify(page);
-                    // 重新拉取当前页
-                    pg--;
-                    continue;
+                if (config.getScale() != null && !config.getScale().isEmpty()) {
+                    cmd.add("--scale");
+                    cmd.add(config.getScale().get(0));
                 }
-
-                JSONObject zpData = root.optJSONObject("zpData");
-                if (zpData == null) {
-                    log.warn("第 {} 页 API 无 zpData", pg);
-                    break;
+                if (config.getStage() != null && !config.getStage().isEmpty()) {
+                    cmd.add("--stage");
+                    cmd.add(config.getStage().get(0));
                 }
-
-                org.json.JSONArray jobList = zpData.optJSONArray("jobList");
-                if (jobList == null || jobList.isEmpty()) {
-                    log.info("第 {} 页没有更多职位，停止拉取", pg);
-                    break;
+                if (config.getIndustry() != null && !config.getIndustry().isEmpty()) {
+                    cmd.add("--industry");
+                    cmd.add(config.getIndustry().get(0));
                 }
 
-                for (int i = 0; i < jobList.length(); i++) {
-                    allJobs.add(jobList.getJSONObject(i));
-                }
+                executePythonCommand(cmd);
 
-                // 翻页随机延迟
-                PlaywrightUtil.sleep((int)(1.0 + Math.random() * 2.0));
-            }
-
-            int count = allJobs.size();
-            log.info("【{}】岗位加载完成，共 {} 条", keyword, count);
-            progressCallback.accept("岗位加载完成：" + keyword, 0, count);
-
-            if (count == 0) {
-                log.info("未找到符合条件的岗位，跳过关键词: {}", keyword);
-                continue;
-            }
-
-            for (int i = 0; i < count; i++) {
-                Integer maxDeliveries = config.getMaxDeliveriesPerKeyword();
-                if (maxDeliveries != null && maxDeliveries > 0 && postCount >= maxDeliveries) {
-                    progressCallback.accept("当前关键词已达到投递上限：" + keyword, postCount, maxDeliveries);
-                    break;
-                }
-                // 检查是否需要停止
-                if (shouldStopCallback != null && Boolean.TRUE.equals(shouldStopCallback.get())) {
-                    progressCallback.accept("用户取消投递", i, count);
-                    return;
-                }
-
-                JSONObject j = allJobs.get(i);
-                String jobName = j.optString("jobName", "");
-                String jobSalary = j.optString("salaryDesc", "");
-                String encryptJobId = j.optString("encryptJobId", "");
-                String securityId = j.optString("securityId", "");
-                String lid = j.optString("lid", "");
-                String bossCompany = j.optString("brandName", "");
-                String bossName = j.optString("bossName", "");
-                String bossJobTitle = j.optString("bossTitle", "");
-
-                // 列表级基础字段过滤（前置过滤以避免无意义的详情页加载）
-                if (!jobName.isEmpty() && blackJobs != null && blackJobs.stream().anyMatch(jobName::contains)) {
-                    String term = findMatchedTerm(blackJobs, jobName);
-                    log.info("被过滤：职位黑名单命中 | 公司：{} | 岗位：{} | 关键词：{}", bossCompany, jobName, term);
-                    continue;
-                }
-                if (!bossCompany.isEmpty() && blackCompanies != null && blackCompanies.stream().anyMatch(bossCompany::contains)) {
-                    String term = findMatchedTerm(blackCompanies, bossCompany);
-                    log.info("被过滤：公司黑名单命中 | 公司：{} | 岗位：{} | 关键词：{}", bossCompany, jobName, term);
-                    continue;
-                }
-                if (!bossJobTitle.isEmpty() && blackRecruiters != null && blackRecruiters.stream().anyMatch(bossJobTitle::contains)) {
-                    String term = findMatchedTerm(blackRecruiters, bossJobTitle);
-                    log.info("被过滤：招聘者黑名单命中 | 公司：{} | 岗位：{} | 招聘者：{} | 关键词：{}", bossCompany, jobName, bossJobTitle, term);
-                    continue;
-                }
-                if (isSalaryBelowMinimum(jobSalary, 12)) {
-                    log.info("Filtered by salary below 12K | company={} | job={} | salary={}", bossCompany, jobName, jobSalary);
-                    continue;
-                }
-
-                // 进入详情页获取完整信息
-                String detailUrl = String.format("https://www.zhipin.com/job_detail/%s.html?lid=%s&securityId=%s", encryptJobId, lid, securityId);
-                Page detailPage = page.context().newPage();
-                
-                try {
-                    String body = fetchJobDetailJsonOrHtml(detailPage, detailUrl);
-
-                    String jobDesc = null;
-                    String bossActive = null;
-                    if (body != null && !body.isEmpty()) {
-                        try {
-                            JSONObject root = new JSONObject(body);
-                            JSONObject zpData = root.optJSONObject("zpData");
-                            JSONObject jobInfo = zpData != null ? zpData.optJSONObject("jobInfo") : null;
-                            JSONObject boss = zpData != null ? zpData.optJSONObject("bossInfo") : null;
-                            if (jobInfo != null) {
-                                jobDesc = jobInfo.optString("postDescription", "");
+                // 解析临时文件并入库
+                if (tempFile.exists() && tempFile.length() > 0) {
+                    String content = Files.readString(tempFile.toPath(), StandardCharsets.UTF_8);
+                    JSONObject root = new JSONObject(content);
+                    if (root.has("jobs")) {
+                        JSONArray jobsArray = root.getJSONArray("jobs");
+                        int count = jobsArray.length();
+                        log.info("Python抓取成功，共 {} 条数据，开始过滤并入库...", count);
+                        int postCount = 0;
+                        for (int i = 0; i < count; i++) {
+                            if (shouldStopCallback != null && Boolean.TRUE.equals(shouldStopCallback.get())) {
+                                progressCallback.accept("用户取消抓取", i, count);
+                                return;
                             }
-                            if (boss != null) {
-                                bossActive = boss.optString("activeTimeDesc", "");
+                            JSONObject j = jobsArray.getJSONObject(i);
+                            String jobName = j.optString("title", "");
+                            String jobSalary = j.optString("salary", "");
+                            String bossCompany = j.optString("boss_name", ""); // brandName
+                            String companyScale = j.optString("company_scale", "");
+                            String location = j.optString("location", "");
+                            String tags = j.optString("tags", "");
+
+                            // 列表级基础过滤
+                            if (!jobName.isEmpty() && blackJobs != null && blackJobs.stream().anyMatch(jobName::contains)) {
+                                continue;
                             }
-                        } catch (Exception e) {
-                            log.debug("解析详情响应失败：{}", e.getMessage());
+                            if (!bossCompany.isEmpty() && blackCompanies != null && blackCompanies.stream().anyMatch(bossCompany::contains)) {
+                                continue;
+                            }
+                            if (isSalaryBelowMinimum(jobSalary, 12)) {
+                                continue;
+                            }
+
+                            // 构造 mock detail 入库
+                            String encryptJobId = j.optString("encrypt_job_id", "");
+                            String encryptBossId = j.optString("encrypt_boss_id", "");
+                            String encryptBrandId = j.optString("encrypt_brand_id", "");
+                            String jobLink = j.optString("job_link", "");
+
+                            String experience = "";
+                            String degree = "";
+                            if (!tags.isEmpty()) {
+                                String[] parts = tags.split(" \\| ");
+                                if (parts.length > 0) experience = parts[0];
+                                if (parts.length > 1) degree = parts[1];
+                            }
+
+                            JSONObject mockRoot = new JSONObject();
+                            JSONObject mockZpData = new JSONObject();
+                            JSONObject mockJobInfo = new JSONObject();
+                            JSONObject mockBrand = new JSONObject();
+                            JSONObject mockBoss = new JSONObject();
+
+                            mockJobInfo.put("encryptId", encryptJobId);
+                            mockJobInfo.put("encryptUserId", encryptBossId);
+                            mockJobInfo.put("jobName", jobName);
+                            mockJobInfo.put("salaryDesc", jobSalary);
+                            mockJobInfo.put("locationName", location);
+                            mockJobInfo.put("experienceName", experience);
+                            mockJobInfo.put("degreeName", degree);
+                            mockJobInfo.put("jobStatusDesc", "招聘中");
+
+                            mockBrand.put("brandName", bossCompany);
+                            mockBrand.put("scaleName", companyScale);
+                            mockBrand.put("industryName", j.optString("company_industry", ""));
+                            mockBrand.put("stageName", j.optString("company_stage", ""));
+
+                            mockBoss.put("encryptBossId", encryptBossId);
+
+                            mockZpData.put("jobInfo", mockJobInfo);
+                            mockZpData.put("brandComInfo", mockBrand);
+                            mockZpData.put("bossInfo", mockBoss);
+                            mockRoot.put("zpData", mockZpData);
+
+                            processJobDetailJsonAndInsert(mockRoot.toString());
+                            postCount++;
+
+                            // SSE
+                            String progressMsg = String.format("  ✓ %s | %s | %s | %s | %s", 
+                                    jobName, jobSalary, location, bossCompany, companyScale);
+                            progressCallback.accept(progressMsg, i + 1, count);
                         }
+                        totalScraped += postCount;
+                        progressCallback.accept("【" + keyword + "】岗位已抓取完毕！实际抓取数量:" + postCount, count, count);
                     }
-
-                    // 详情级高级字段过滤
-                    boolean hrInactiveByYear = bossActive != null && bossActive.contains("年");
-                    if (Boolean.TRUE.equals(config.getFilterDeadHR()) && hrInactiveByYear) {
-                        log.info("被过滤：HR活跃状态包含‘年’ | 公司：{} | 岗位：{} | 活跃：{}", bossCompany, jobName, bossActive);
-                        continue;
-                    }
-                    if (hasAgeLimit(jobDesc)) {
-                        log.info("Filtered by age limit | company={} | job={} | salary={}", bossCompany, jobName, jobSalary);
-                        continue;
-                    }
-
-                    // 存入数据库
-                    if (body != null) {
-                        processJobDetailJsonAndInsert(body);
-                    } else {
-                        // 若抓取异常，使用列表基础信息做最小化的 mock 数据入库
-                        String mockBody = constructMockDetailJson(j, "");
-                        processJobDetailJsonAndInsert(mockBody);
-                    }
-
-                    // 构建投递对象
-                    List<String> tags = new ArrayList<>();
-                    tags.add(j.optString("cityName", ""));
-                    tags.add(j.optString("jobExperience", ""));
-                    tags.add(j.optString("jobDegree", ""));
-
-                    Job job = new Job();
-                    job.setJobName(jobName);
-                    job.setSalary(jobSalary);
-                    job.setJobArea(String.join(", ", tags));
-                    job.setCompanyName(bossCompany);
-                    job.setRecruiter(bossName);
-                    job.setJobInfo(jobDesc != null ? jobDesc : "");
-
-                    progressCallback.accept("正在投递：" + jobName, i + 1, count);
-                    if (resumeSubmission(detailPage, keyword, job)) {
-                        postCount++;
-                    }
-                } catch (Exception e) {
-                    log.error("处理岗位【{}】时发生异常: {}", jobName, e.getMessage(), e);
-                } finally {
-                    try { detailPage.close(); } catch (Exception ignored) {}
+                } else {
+                    progressCallback.accept("Python抓取未生成数据", 0, 0);
                 }
-                
-                // 投递间隔随机延迟，保护账号
-                PlaywrightUtil.sleep((int)(3.0 + Math.random() * 5.0));
+            } catch (Exception e) {
+                log.error("CDP抓取异常: {}", e.getMessage(), e);
+                progressCallback.accept("抓取异常: " + e.getMessage(), 0, 0);
             }
-            log.info("【{}】岗位已投递完毕！已投递岗位数量:{}", keyword, postCount);
+        }
+    }
+
+    private void executePythonCommand(List<String> cmd) throws Exception {
+        ProcessBuilder pb = new ProcessBuilder(cmd);
+        pb.redirectErrorStream(true);
+        Process process = pb.start();
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                log.info("[Python Scraper] {}", line);
+                progressCallback.accept(line, null, null);
+            }
+        }
+        int exitCode = process.waitFor();
+        if (exitCode != 0) {
+            throw new RuntimeException("Python scraper exited with code " + exitCode);
         }
     }
 
@@ -741,20 +796,26 @@ public class Boss {
 
         // 3. 查找"立即沟通"按钮
         closeAnyBlockingOverlays(detailPage);
-        Locator chatBtn = detailPage.locator(BossPageModel.CHAT_BUTTON_SELECTOR);
+        Locator chatBtn = detailPage.locator(".btn-startchat, .op-btn-chat, a:has-text('立即沟通'), .btn:has-text('立即沟通'), button:has-text('立即沟通'), div[role='button']:has-text('立即沟通')");
         boolean foundChatBtn = false;
         for (int i = 0; i < 5; i++) {
             if (shouldStopCallback != null && Boolean.TRUE.equals(shouldStopCallback.get())) {
                 log.info("停止指令已触发，结束查找聊天按钮 | 公司：{} | 岗位：{}", job.getCompanyName(), job.getJobName());
                 return false;
             }
-            if (chatBtn.count() > 0 && (chatBtn.first().textContent().contains("立即沟通"))) {
+            if (chatBtn.count() > 0) {
                 foundChatBtn = true;
                 break;
             }
             PlaywrightUtil.sleep(1);
+            chatBtn = detailPage.locator(".btn-startchat, .op-btn-chat, a:has-text('立即沟通'), .btn:has-text('立即沟通'), button:has-text('立即沟通'), div[role='button']:has-text('立即沟通')");
         }
         if (!foundChatBtn) {
+            try {
+                String html = detailPage.content();
+                java.nio.file.Files.writeString(java.nio.file.Paths.get("target/boss-error-" + job.getJobName() + ".html"), html);
+                log.error("Saved Boss Zhipin error page HTML to target/boss-error-{}.html", job.getJobName());
+            } catch (Exception ignored) {}
             failPageModel("Boss未找到立即沟通按钮，岗位: " + job.getJobName(), null);
         }
         nativeClick(detailPage, chatBtn.first());
@@ -1392,24 +1453,26 @@ public class Boss {
         return "https://www.zhipin.com/wapi/zpgeek/search/joblist.json?" + String.join("&", params);
     }
 
+    private String doHttpGet(String url) {
+        com.wh.jobsbackend.application.entity.CookieEntity cookie = cookieService.getCookieByPlatform(userId, "boss");
+        if (cookie == null || cookie.getCookieValue() == null) {
+            throw new RuntimeException("未能获取到Boss直聘的Cookie，请重新登录");
+        }
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Cookie", cookie.getCookieValue());
+        headers.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+        headers.set("Accept", "application/json, text/plain, */*");
+        
+        HttpEntity<String> entity = new HttpEntity<>(headers);
+        ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+        return response.getBody();
+    }
+
     private String fetchJobListJson(String apiUrl) {
-        String script = String.format(
-            "(function(){\n" +
-            "    try {\n" +
-            "        var xhr = new XMLHttpRequest();\n" +
-            "        xhr.open('GET', '%s', false);\n" +
-            "        xhr.send();\n" +
-            "        if (xhr.status !== 200) return JSON.stringify({error: 'HTTP ' + xhr.status});\n" +
-            "        return xhr.responseText;\n" +
-            "    } catch(e) {\n" +
-            "        return JSON.stringify({error: e.toString()});\n" +
-            "    }\n" +
-            "})()", apiUrl);
         try {
-            Object result = page.evaluate(script);
-            return result != null ? result.toString() : null;
+            return doHttpGet(apiUrl);
         } catch (Exception e) {
-            log.error("JS evaluate fetchJobListJson failed", e);
+            log.error("Http get fetchJobListJson failed", e);
             return null;
         }
     }

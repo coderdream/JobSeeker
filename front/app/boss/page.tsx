@@ -12,6 +12,7 @@ import { Select } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import PageHeader from '@/app/components/PageHeader'
 import AnalysisContent from '@/app/boss/analysis/AnalysisContent'
+import JobList from './JobList'
 import { useAuthedRequest } from '@/components/auth/useAuthedRequest'
 import { getApiBaseUrl } from '@/lib/api-client'
 import { confirmPlatformLogin, openPlatformLogin, startPlatformTask } from '@/lib/platform-requests'
@@ -110,6 +111,9 @@ export default function BossPage() {
   const [saveResult, setSaveResult] = useState<{ success: boolean; message: string } | null>(null)
   const [showLogoutResultDialog, setShowLogoutResultDialog] = useState(false)
   const [logoutResult, setLogoutResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [showLoginResultDialog, setShowLoginResultDialog] = useState(false)
+  const [loginResult, setLoginResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [logs, setLogs] = useState<string[]>([])
 
   useEffect(() => {
     if (!token) {
@@ -192,6 +196,11 @@ export default function BossPage() {
             try {
               const data = JSON.parse(event.data)
               console.log('[Boss task SSE] progress:', data)
+              setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${data.message || JSON.stringify(data)}`])
+              
+              if (data.type === 'error' || data.type === 'success' || (data.message && data.message.includes('抓取任务完成'))) {
+                setIsDelivering(false)
+              }
             } catch (error) {
               console.warn('[Boss task SSE] failed to parse progress:', error)
             }
@@ -340,7 +349,7 @@ export default function BossPage() {
         }
 
         // 城市：若当前为中文名，转换为对应的 code 以在下拉中回显
-        const currentCityRaw = data.config?.cityCode || ''
+        const currentCityRaw = data.config?.cityCode || '101200100'
         const currentCityHead = (() => {
           const list = parseListString(currentCityRaw)
           return list.length > 0 ? list[0] : currentCityRaw
@@ -505,24 +514,18 @@ export default function BossPage() {
     }
   }
 
-  const handleStartDelivery = async () => {
-    try {
-      setIsDelivering(true)
-      await startPlatformTask(authedFetch, 'boss')
-    } catch (error) {
-      console.error('Failed to start delivery:', error)
-      // 启动失败：不弹框
-      setIsDelivering(false)
-    }
-  }
 
   const handleOpenLogin = async () => {
     try {
       setCheckingLogin(true)
       await openPlatformLogin(authedFetch, 'boss')
-      setCheckingLogin(false)
-    } catch (error) {
+      setLoginResult({ success: true, message: '已在后台执行启动命令，请等待浏览器窗口弹出，完成登录后再点击【刷新登录状态】。' })
+      setShowLoginResultDialog(true)
+    } catch (error: any) {
       console.error('[Boss] 打开登录入口失败:', error)
+      setLoginResult({ success: false, message: error.message || '启动浏览器失败，请检查后端服务' })
+      setShowLoginResultDialog(true)
+    } finally {
       setCheckingLogin(false)
     }
   }
@@ -532,13 +535,31 @@ export default function BossPage() {
       setCheckingLogin(true)
       const status = await confirmPlatformLogin(authedFetch, 'boss')
       setIsLoggedIn(Boolean(status.isLoggedIn))
-    } catch (error) {
+      setLoginResult({ success: Boolean(status.isLoggedIn), message: status.message || (status.isLoggedIn ? '登录状态已刷新' : '登录状态已失效') })
+      setShowLoginResultDialog(true)
+    } catch (error: any) {
       console.error('[Boss] refresh login status failed:', error)
+      setLoginResult({ success: false, message: error.message || '刷新登录状态失败，请检查网络或后端服务' })
+      setShowLoginResultDialog(true)
     } finally {
       setCheckingLogin(false)
     }
   }
 
+  const handleStartDelivery = async () => {
+    try {
+      // 启动前先自动保存一次配置（静默保存），确保后端拿到的参数和前端一致
+      await handleSave(true)
+      
+      setIsDelivering(true)
+      await startPlatformTask(authedFetch, 'boss')
+    } catch (error: any) {
+      console.error('Failed to start delivery:', error)
+      setLoginResult({ success: false, message: error.message || '启动抓取任务失败' })
+      setShowLoginResultDialog(true)
+      setIsDelivering(false)
+    }
+  }
   const handleStopDelivery = async () => {
     try {
       const response = await authedFetch('/api/boss/stop', {
@@ -612,11 +633,11 @@ export default function BossPage() {
               </div>
             ) : isDelivering ? (
               <Button onClick={handleStopDelivery} size="sm" variant="destructive" className="px-3">
-                <BiStop className="mr-1" /> 停止投递
+                <BiStop className="mr-1" /> 停止抓取
               </Button>
             ) : (
               <Button onClick={handleStartDelivery} size="sm" className="px-3">
-                <BiPlay className="mr-1" /> 开始投递
+                <BiPlay className="mr-1" /> 抓取职位
               </Button>
             )}
             <Button onClick={() => setShowLogoutDialog(true)} size="sm" variant="outline" className="px-3 text-destructive hover:text-destructive">
@@ -640,41 +661,25 @@ export default function BossPage() {
       />
 
       <Tabs defaultValue="config" className="min-w-0">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="config">平台配置</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="config">职位</TabsTrigger>
           <TabsTrigger value="analytics">投递分析</TabsTrigger>
+          <TabsTrigger value="blacklist">配置</TabsTrigger>
+          <TabsTrigger value="logs">日志</TabsTrigger>
         </TabsList>
 
         <TabsContent value="config" className="mt-5 min-w-0 space-y-4">
-          {/* 平台说明 */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <BiBriefcase className="text-primary" />
-                Boss直聘平台说明
-              </CardTitle>
-              <CardDescription>登录与投递操作提示</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">请在浏览器标签页中登录 Boss 直聘平台，登录成功后系统会自动检测登录状态。</p>
-                <p className="text-sm text-muted-foreground">登录成功后，点击“开始投递”按钮启动自动投递任务。</p>
-                <p className="text-sm text-muted-foreground">点击“保存配置”按钮可手动保存当前登录相关信息到数据库。</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* 搜索配置 */}
+          {/* 综合配置 */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <BiSearch className="text-primary" />
-                搜索配置
+                综合搜索与过滤配置
               </CardTitle>
-              <CardDescription>设置职位搜索关键词和目标城市</CardDescription>
+              <CardDescription>配置搜索、薪资、经验、公司规模等参数</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <div className="space-y-2">
                   <Label htmlFor="keywords">搜索关键词</Label>
                   <Input
@@ -742,22 +747,7 @@ export default function BossPage() {
                 </Select>
                 <p className="text-xs text-muted-foreground">开启后将过滤活跃状态包含“年”的HR，但仍保存数据。</p>
               </div>
-              </div>
-            </CardContent>
-        </Card>
-
-        {/* 薪资和经验 */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <BiMoney className="text-primary" />
-              薪资与经验要求
-            </CardTitle>
-            <CardDescription>设置薪资待遇和工作经验要求</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-              <div className="space-y-2">
+                <div className="space-y-2">
                 <Label>薪资待遇</Label>
                 <MultiSelect
                   options={options.salary}
@@ -776,22 +766,7 @@ export default function BossPage() {
                   placeholder="选择工作经验"
                 />
               </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* 公司要求 */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <BiBuilding className="text-primary" />
-              公司要求
-            </CardTitle>
-            <CardDescription>设置目标公司的规模和融资阶段</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-              <div className="space-y-2">
+                <div className="space-y-2">
                 <Label>学历要求</Label>
                 <MultiSelect
                   options={options.degree}
@@ -820,11 +795,45 @@ export default function BossPage() {
                   placeholder="选择融资阶段"
                 />
               </div>
-            </div>
-          </CardContent>
-        </Card>
+              </div>
+            </CardContent>
+          </Card>
+          <JobList />
+          
 
-        {/* 黑名单管理 */}
+          
+
+        
+
+        
+
+        
+
+        
+        </TabsContent>
+
+        <TabsContent value="analytics" className="mt-5 min-w-0 space-y-5">
+          <AnalysisContent />
+        </TabsContent>
+        <TabsContent value="blacklist" className="mt-5 min-w-0 space-y-4">
+{/* 平台说明 */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <BiBriefcase className="text-primary" />
+                Boss直聘平台说明
+              </CardTitle>
+              <CardDescription>登录与抓取操作提示</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <h4 className="text-sm font-medium mb-1">3. 抓取职位</h4>
+                <p className="text-sm text-muted-foreground">登录成功后，点击“抓取职位”按钮启动抓取任务。</p>
+                <p className="text-sm text-muted-foreground">点击“保存配置”按钮可手动保存当前登录相关信息到数据库。</p>
+              </div>
+            </CardContent>
+          </Card>
+          {/* 黑名单管理 */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -963,12 +972,22 @@ export default function BossPage() {
             </div>
           </CardContent>
         </Card>
-
-        
         </TabsContent>
-
-        <TabsContent value="analytics" className="mt-5 min-w-0 space-y-5">
-          <AnalysisContent />
+        <TabsContent value="logs" className="mt-5 min-w-0 space-y-4">
+          
+          <Card>
+            <CardHeader>
+              <CardTitle>运行日志</CardTitle>
+              <CardDescription>实时查看任务运行状态</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="h-[400px] bg-slate-900 text-green-400 p-4 rounded overflow-y-auto font-mono text-sm flex flex-col-reverse">
+                <div>
+                  {logs.length === 0 ? "暂无日志" : logs.map((l, idx) => <div key={idx}>{l}</div>)}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 
@@ -1017,6 +1036,13 @@ export default function BossPage() {
         message={logoutResult?.message}
         tone={logoutResult?.success ? 'success' : 'error'}
         onClose={() => setShowLogoutResultDialog(false)}
+      />
+      <FeedbackDialog
+        open={showLoginResultDialog && Boolean(loginResult)}
+        title={loginResult?.success ? '成功' : '提示'}
+        message={loginResult?.message}
+        tone={loginResult?.success ? 'success' : 'error'}
+        onClose={() => setShowLoginResultDialog(false)}
       />
 
       <FeedbackDialog

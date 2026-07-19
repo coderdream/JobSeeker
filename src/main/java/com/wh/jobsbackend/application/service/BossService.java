@@ -271,13 +271,25 @@ public class BossService {
      * 从配置文件和数据库加载完整的Boss配置
      */
     public BossConfig loadBossConfig() {
-        Long userId = currentUserService.requireUserId();
+        return loadBossConfig(currentUserService.requireUserId());
+    }
+
+    public BossConfig loadBossConfig(Long userId) {
         // 直接从数据库 hub_boss_config 加载，并将括号列表解析为集合
         BossConfigEntity entity = getFirstConfig(userId);
         BossConfig config = new BossConfig();
 
         if (entity == null) {
             log.warn("hub_boss_config 表为空，使用默认空配置");
+            config.setKeywords(new ArrayList<>());
+            config.setCityCode(new ArrayList<>());
+            config.setExperience(new ArrayList<>());
+            config.setDegree(new ArrayList<>());
+            config.setSalary(new ArrayList<>());
+            config.setJobType("");
+            config.setIndustry(new ArrayList<>());
+            config.setScale(new ArrayList<>());
+            config.setStage(new ArrayList<>());
             return config;
         }
 

@@ -71,9 +71,17 @@ public class BossController {
         Map<String, Object> response = new HashMap<>();
         try {
             Long userId = currentUserService.requireUserId();
-            if (!playwrightManager.isLoggedIn(userId, "boss")) {
+            try {
+                boolean isLoggedIn = playwrightManager.refreshLoginStatus(userId, "boss");
+                if (!isLoggedIn) {
+                    response.put("success", false);
+                    response.put("message", "Boss登录状态已失效，请重新登录");
+                    response.put("status", "not_logged_in");
+                    return ResponseEntity.badRequest().body(response);
+                }
+            } catch (Exception e) {
                 response.put("success", false);
-                response.put("message", "请先登录Boss直聘");
+                response.put("message", e.getMessage());
                 response.put("status", "not_logged_in");
                 return ResponseEntity.badRequest().body(response);
             }
@@ -153,14 +161,24 @@ public class BossController {
     @PostMapping("/login-confirmed")
     public ResponseEntity<Map<String, Object>> confirmBossLogin() {
         Long userId = currentUserService.requireUserId();
-        playwrightManager.setLoginStatus(userId, "boss", true);
-        return ResponseEntity.ok(Map.of(
-                "success", true,
-                "platform", "boss",
-                "isLoggedIn", true,
-                "message", "Boss 登录状态已刷新",
-                "timestamp", System.currentTimeMillis()
-        ));
+        try {
+            boolean isLoggedIn = playwrightManager.refreshLoginStatus(userId, "boss");
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "platform", "boss",
+                    "isLoggedIn", isLoggedIn,
+                    "message", "Boss 登录状态已刷新",
+                    "timestamp", System.currentTimeMillis()
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.ok(Map.of(
+                    "success", false,
+                    "platform", "boss",
+                    "isLoggedIn", false,
+                    "message", e.getMessage(),
+                    "timestamp", System.currentTimeMillis()
+            ));
+        }
     }
 
     /** POST - logout Boss */
@@ -248,6 +266,51 @@ public class BossController {
             log.error("一键投递失败", e);
             response.put("success", false);
             response.put("message", "一键投递失败: " + e.getMessage());
+            return ResponseEntity.status(500).body(response);
+        }
+    }
+
+    /** POST - 一键获取详情：对前端勾选的岗位 id 列表获取详情（JD 等信息） */
+    @PostMapping("/fetch-details")
+    public ResponseEntity<Map<String, Object>> fetchDetails(@org.springframework.web.bind.annotation.RequestBody Map<String, Object> body) {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            Long userId = currentUserService.requireUserId();
+            if (!playwrightManager.isLoggedIn(userId, "boss")) {
+                response.put("success", false);
+                response.put("message", "请先登录Boss直聘");
+                return ResponseEntity.badRequest().body(response);
+            }
+            @SuppressWarnings("unchecked")
+            java.util.List<Integer> rawIds = (java.util.List<Integer>) body.get("jobIds");
+            if (rawIds == null || rawIds.isEmpty()) {
+                response.put("success", false);
+                response.put("message", "jobIds 不能为空");
+                return ResponseEntity.badRequest().body(response);
+            }
+            java.util.List<Long> jobIds = rawIds.stream().map(i -> i.longValue()).collect(java.util.stream.Collectors.toList());
+            // 从数据库加载岗位信息
+            java.util.List<com.wh.jobsbackend.application.entity.BossJobDataEntity> jobs = jobIds.stream()
+                    .map(bossService::findById)
+                    .filter(e -> e != null && e.getJobUrl() != null && !e.getJobUrl().isBlank())
+                    .collect(java.util.stream.Collectors.toList());
+            if (jobs.isEmpty()) {
+                response.put("success", false);
+                response.put("message", "没有找到有效的岗位（jobUrl 不能为空）");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            // 异步执行获取详情
+            taskExecutor.execute(() -> bossJobService.fetchSpecificJobDetails(userId, jobs, pm -> sendBossProgress(userId, pm)));
+
+            response.put("success", true);
+            response.put("message", String.format("已启动批量获取详情任务，共 %d 个岗位", jobs.size()));
+            response.put("count", jobs.size());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("批量获取详情失败", e);
+            response.put("success", false);
+            response.put("message", "批量获取详情失败: " + e.getMessage());
             return ResponseEntity.internalServerError().body(response);
         }
     }

@@ -9,6 +9,7 @@ spring:
       connection-test-query: SELECT 1
   flyway:
     locations: classpath:db/sqlite
+    baseline-on-migrate: true
 
 logging:
   level:

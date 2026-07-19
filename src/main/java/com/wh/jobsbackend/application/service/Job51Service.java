@@ -821,4 +821,9 @@ public class Job51Service {
             return rs.next() ? rs.getLong(1) : 0L;
         }
     }
+
+    public Job51Config loadJob51Config(Long userId) {
+        return loadJob51Config();
+    }
+
 }

@@ -303,12 +303,20 @@ public class ConfigService {
     public BossConfig getBossConfig() {
         return bossService.loadBossConfig();
     }
+    
+    public BossConfig getBossConfig(Long userId) {
+        return bossService.loadBossConfig(userId);
+    }
 
     /**
      * 统一入口：从专表 hub_zhilian_config 读取并构造 ZhilianConfig
      */
     public ZhilianConfig getZhilianConfig() {
         return zhilianService.loadZhilianConfig();
+    }
+    
+    public ZhilianConfig getZhilianConfig(Long userId) {
+        return zhilianService.loadZhilianConfig(userId);
     }
 
     /**
@@ -317,8 +325,16 @@ public class ConfigService {
     public Job51Config getJob51Config() {
         return job51Service.loadJob51Config();
     }
+    
+    public Job51Config getJob51Config(Long userId) {
+        return job51Service.loadJob51Config(userId);
+    }
 
     public YupaoConfig getYupaoConfig() {
         return yupaoService.loadYupaoConfig();
+    }
+    
+    public YupaoConfig getYupaoConfig(Long userId) {
+        return yupaoService.loadYupaoConfig(userId);
     }
 }

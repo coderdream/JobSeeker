@@ -65,7 +65,7 @@ public class ZhilianJobService extends AbstractPlatformJobService {
                 throw new PlatformPageModelException("请先登录智联招聘");
             }
 
-            ZhilianConfig config = configService.getZhilianConfig();
+            ZhilianConfig config = configService.getZhilianConfig(userId);
             if (config.getKeywords() == null || config.getKeywords().isEmpty()) {
                 throw new IllegalArgumentException("请先配置智联招聘关键词");
             }
@@ -141,7 +141,7 @@ public class ZhilianJobService extends AbstractPlatformJobService {
 
         playwrightManager.pauseZhilianMonitoring();
         try {
-            ZhilianConfig config = configService.getZhilianConfig();
+            ZhilianConfig config = configService.getZhilianConfig(userId);
             progressCallback.accept(JobProgressMessage.info(PLATFORM, "\u914d\u7f6e\u52a0\u8f7d\u6210\u529f"));
             progressCallback.accept(JobProgressMessage.info(PLATFORM, "\u5f00\u59cb\u6295\u9012\u4efb\u52a1..."));
 

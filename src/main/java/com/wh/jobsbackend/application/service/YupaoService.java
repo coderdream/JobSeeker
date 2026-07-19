@@ -427,4 +427,9 @@ public class YupaoService {
         public int page;
         public int size;
     }
+
+    public YupaoConfig loadYupaoConfig(Long userId) {
+        return loadYupaoConfig();
+    }
+
 }

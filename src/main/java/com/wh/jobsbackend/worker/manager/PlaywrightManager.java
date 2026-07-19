@@ -80,6 +80,9 @@ public class PlaywrightManager {
     // 登录状态追踪（平台 -> 是否已登录）
     private final Map<String, Boolean> loginStatus = new ConcurrentHashMap<>();
 
+    // Boss用户专项登录状态追踪，绕过Playwright进程
+    private final Map<Long, Boolean> bossUserLoginStatus = new ConcurrentHashMap<>();
+
     // 登录状态监听器
     private final List<Consumer<LoginStatusChange>> loginStatusListeners = new CopyOnWriteArrayList<>();
 
@@ -177,8 +180,6 @@ public class PlaywrightManager {
                     .setUserAgent(
                             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"));
             log.info("✓ BrowserContext已创建（所有平台共享）");
-            injectBossInitScript(context);
-
             // 顺序创建所有Page（避免并发创建Page导致的竞态条件）
             log.info("开始创建所有平台的Page...");
             bossPage = context.newPage();
@@ -243,29 +244,37 @@ public class PlaywrightManager {
 
     private BrowserContext newBossPersistentContext(UserAutomationSession session) {
         try {
-            Path profileDir = Paths.get(System.getProperty("user.dir"), ".runtime", "playwright", "boss-user-" + session.getUserId())
-                    .toAbsolutePath()
-                    .normalize();
-            Files.createDirectories(profileDir);
-            BrowserType.LaunchPersistentContextOptions options = new BrowserType.LaunchPersistentContextOptions()
-                    .setHeadless(false)
-                    .setChannel("chrome")
-                    .setViewportSize(null)
-                    .setLocale("zh-CN")
-                    .setTimezoneId("Asia/Shanghai")
-                    .setIgnoreDefaultArgs(List.of("--enable-automation")) // <--- 重点：移除自动化横幅和标志
-                    .setExtraHTTPHeaders(extraHeadersForPlatform("boss"))
-                    .setUserAgent(windowsChromeUserAgent(session.getBrowser()))
-                    .setArgs(List.of(
-                            "--disable-blink-features=AutomationControlled",
-                            "--disable-infobars",
-                            "--no-first-run",
-                            "--start-maximized"
-                    ));
-            log.info("Creating Boss persistent browser context: userId={}, profileDir={}", session.getUserId(), profileDir);
-            return playwright.chromium().launchPersistentContext(profileDir, options);
-        } catch (IOException e) {
-            throw new RuntimeException("创建 Boss 持久化浏览器目录失败", e);
+            log.info("Connecting to Boss CDP Chrome at http://127.0.0.1:9222 for user " + session.getUserId());
+            Browser cdpBrowser = playwright.chromium().connectOverCDP("http://127.0.0.1:9222");
+            log.info("Successfully connected to Boss CDP Chrome.");
+            return cdpBrowser.contexts().get(0);
+        } catch (Exception e) {
+            log.warn("Failed to connect to Boss CDP (http://127.0.0.1:9222), falling back to local persistent context: " + e.getMessage());
+            try {
+                Path profileDir = Paths.get(System.getProperty("user.dir"), ".runtime", "playwright", "boss-user-" + session.getUserId())
+                        .toAbsolutePath()
+                        .normalize();
+                Files.createDirectories(profileDir);
+                BrowserType.LaunchPersistentContextOptions options = new BrowserType.LaunchPersistentContextOptions()
+                        .setHeadless(false)
+                        .setChannel("chrome")
+                        .setViewportSize(null)
+                        .setLocale("zh-CN")
+                        .setTimezoneId("Asia/Shanghai")
+                        .setIgnoreDefaultArgs(List.of("--enable-automation")) // <--- 重点：移除自动化横幅和标志
+                        .setExtraHTTPHeaders(extraHeadersForPlatform("boss"))
+                        .setUserAgent(windowsChromeUserAgent(session.getBrowser()))
+                        .setArgs(List.of(
+                                "--disable-blink-features=AutomationControlled",
+                                "--disable-infobars",
+                                "--no-first-run",
+                                "--start-maximized"
+                        ));
+                log.info("Creating Boss persistent browser context: userId={}, profileDir={}", session.getUserId(), profileDir);
+                return playwright.chromium().launchPersistentContext(profileDir, options);
+            } catch (IOException ex) {
+                throw new RuntimeException("创建 Boss 持久化浏览器目录失败", ex);
+            }
         }
     }
 
@@ -308,9 +317,6 @@ public class PlaywrightManager {
     }
 
     private void initializeUserContext(Long userId, String platform, BrowserContext targetContext) {
-        if ("boss".equals(platform)) {
-            injectBossInitScript(targetContext);
-        }
         ensurePlatformHandlers();
         PlatformPlaywrightHandler handler = platformHandlers.get(platform);
         String domain = handler == null ? domainForPlatform(platform) : handler.domain();
@@ -1176,13 +1182,32 @@ public class PlaywrightManager {
      * 触发 51job 登录流程：打开登录页并点击“微信扫码登录”按钮
      */
     public void triggerBossLogin(Long userId) {
-        PlatformPlaywrightHandler handler = platformHandler("boss");
-        PlaywrightAutomationContext context = ensureAutomationContext();
-        context.withPlaywrightLock(() -> {
-            synchronized (context.platformLock(userId, "boss")) {
-                handler.triggerLogin(userId);
+        log.info("开始通过 Python 脚本启动 Boss Chrome CDP 模式...");
+        new Thread(() -> {
+            try {
+                java.util.List<String> cmd = new java.util.ArrayList<>();
+                cmd.add("D:\\04_GitHub\\boss-zhipin-scraper\\.venv\\Scripts\\python.exe");
+                cmd.add("scripts\\boss_cdp_raw.py");
+                cmd.add("--setup-chrome");
+
+                ProcessBuilder pb = new ProcessBuilder(cmd);
+                pb.directory(new java.io.File("D:\\04_GitHub\\boss-zhipin-scraper"));
+                pb.redirectErrorStream(true);
+                Process process = pb.start();
+                
+                try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(process.getInputStream(), "UTF-8"))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        log.info("[Boss CDP Setup] {}", line);
+                    }
+                }
+                
+                int exitCode = process.waitFor();
+                log.info("Boss Chrome CDP Setup 脚本执行完毕，退出码: {}", exitCode);
+            } catch (Exception e) {
+                log.error("启动 Boss Chrome CDP 脚本失败", e);
             }
-        });
+        }).start();
     }
 
     public void triggerLiepinLogin(Long userId) {
@@ -1746,18 +1771,62 @@ public class PlaywrightManager {
     }
 
     public boolean refreshLoginStatus(Long userId, String platform) {
+        if ("boss".equals(platform)) {
+            String versionUrl = "http://127.0.0.1:9222/json/version";
+            log.info("========== Boss 刷新登录状态 ==========");
+            log.info("开始检查 Chrome 远程调试端口 9222 ...");
+            log.info("请求地址: {}", versionUrl);
+            try {
+                org.springframework.web.client.RestTemplate restTemplate = new org.springframework.web.client.RestTemplate();
+                String response = restTemplate.getForObject(versionUrl, String.class);
+                log.info("✅ Chrome 远程调试端口 9222 检查通过！");
+                log.info("响应内容: {}", response);
+                setLoginStatus(userId, "boss", true);
+                log.info("Boss 登录状态已设置为: 已登录 (userId={})", userId);
+                log.info("========================================");
+                return true;
+            } catch (Exception e) {
+                log.warn("❌ Chrome 远程调试端口 9222 检查失败！");
+                log.warn("失败原因: {}", e.getMessage());
+                log.warn("未能连接到Chrome浏览器（端口9222）。请先点击右上角的【打开Boss登录】按钮来启动浏览器！");
+                setLoginStatus(userId, "boss", false);
+                log.info("Boss 登录状态已设置为: 未登录 (userId={})", userId);
+                log.info("========================================");
+                throw new RuntimeException("未能连接到Chrome浏览器（端口9222）。请先点击右上角的【打开Boss登录】按钮来启动浏览器！");
+            }
+        }
         return ensureAutomationContext().refreshLoginStatus(userId, platformHandler(platform));
     }
 
     public boolean isLoggedIn(Long userId, String platform) {
+        if ("boss".equals(platform)) {
+            return getCachedLoginStatus(userId, platform);
+        }
         return ensureAutomationContext().isLoggedIn(userId, platform);
     }
 
     public boolean getCachedLoginStatus(Long userId, String platform) {
-        return ensureAutomationContext().isLoggedIn(userId, platform);
+        if ("boss".equals(platform)) {
+            return bossUserLoginStatus.getOrDefault(userId, false);
+        }
+        if (automationContext == null) {
+            return false;
+        }
+        return automationContext.getCachedLoginStatus(userId, platform);
     }
 
     public void setLoginStatus(Long userId, String platform, boolean isLoggedIn) {
+        if ("boss".equals(platform)) {
+            Boolean previous = bossUserLoginStatus.put(userId, isLoggedIn);
+            if (previous == null || previous != isLoggedIn) {
+                log.info("Boss 登录状态更新: userId={}, isLoggedIn={}", userId, isLoggedIn);
+                LoginStatusChange change = new LoginStatusChange(userId, "boss", isLoggedIn, System.currentTimeMillis());
+                loginStatusListeners.forEach(listener -> {
+                    try { listener.accept(change); } catch (Exception ignore) {}
+                });
+            }
+            return;
+        }
         ensureAutomationContext().setLoginStatus(userId, platform, isLoggedIn);
     }
 

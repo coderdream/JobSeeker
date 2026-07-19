@@ -106,6 +106,13 @@ public class PlaywrightAutomationContext {
         return platformRuntime.isLoggedIn(userId, platform);
     }
 
+    public boolean getCachedLoginStatus(Long userId, String platform) {
+        if (platformRuntime == null) {
+            return false;
+        }
+        return platformRuntime.getCachedLoginStatus(userId, platform);
+    }
+
     public void setLoginStatus(Long userId, String platform, boolean loggedIn) {
         ensureRuntime();
         boolean previousStatus = platformRuntime.isLoggedIn(userId, platform);
@@ -214,16 +221,16 @@ public class PlaywrightAutomationContext {
     public void saveCookiesToDb(Long userId, PlatformPlaywrightHandler handler, String remark) {
         ensureRuntime();
         withPlaywrightLock(() -> {
-        synchronized (platformRuntime.getPlatformLock(userId, handler.platform())) {
-            try {
-                BrowserContext userContext = getContext(userId, handler);
-                List<Cookie> cookies = filterCookiesByDomain(userContext.cookies(), handler.domain());
-                String cookieJson = objectMapper.writeValueAsString(cookies);
-                cookieService.saveOrUpdateCookie(userId, handler.platform(), cookieJson, remark);
-            } catch (Exception e) {
-                throw new RuntimeException("保存Cookie失败: " + handler.platform(), e);
+            synchronized (platformRuntime.getPlatformLock(userId, handler.platform())) {
+                try {
+                    BrowserContext userContext = getContext(userId, handler);
+                    List<Cookie> cookies = filterCookiesByDomain(userContext.cookies(), handler.domain());
+                    String cookieJson = objectMapper.writeValueAsString(cookies);
+                    cookieService.saveOrUpdateCookie(userId, handler.platform(), cookieJson, remark);
+                } catch (Exception e) {
+                    throw new RuntimeException("保存Cookie失败: " + handler.platform(), e);
+                }
             }
-        }
         });
     }
 

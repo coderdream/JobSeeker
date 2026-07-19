@@ -102,7 +102,7 @@ function LoginForm() {
   const { login, ready, isAuthenticated } = useAuth()
   const redirectTarget = useMemo(() => searchParams.get("redirect") || "/env-config", [searchParams])
   const [mode, setMode] = useState<AuthMode>("login")
-  const [loginForm, setLoginForm] = useState<LoginFormState>({ username: "", password: "" })
+  const [loginForm, setLoginForm] = useState<LoginFormState>({ username: "codex", password: "Codex12345" })
   const [registerForm, setRegisterForm] = useState<RegisterFormState>({
     username: "",
     nickname: "",

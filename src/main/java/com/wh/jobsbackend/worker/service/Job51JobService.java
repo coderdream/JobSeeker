@@ -54,7 +54,7 @@ public class Job51JobService extends AbstractPlatformJobService {
 
         playwrightManager.pause51jobMonitoring();
         try {
-            Job51Config config = configService.getJob51Config();
+            Job51Config config = configService.getJob51Config(userId);
             progressCallback.accept(JobProgressMessage.info(PLATFORM, "\u914d\u7f6e\u52a0\u8f7d\u6210\u529f"));
             progressCallback.accept(JobProgressMessage.info(PLATFORM, "\u5f00\u59cb\u6295\u9012\u4efb\u52a1..."));
 
