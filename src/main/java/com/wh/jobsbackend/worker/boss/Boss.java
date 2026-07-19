@@ -166,9 +166,11 @@ public class Boss {
             success = resumeSubmission(page, jobUrl, securityId, jobName, job);
             if (success) {
                 bossService.updateDeliveryStatusById(jobId, "已投递");
+                log.info("【投递成功】公司：{} | 岗位：{}", companyName, jobName);
                 return "已投递";
             } else {
                 bossService.updateDeliveryStatusById(jobId, "投递失败");
+                log.warn("【投递失败】公司：{} | 岗位：{}", companyName, jobName);
                 return "投递失败";
             }
         } catch (Exception e) {
@@ -828,10 +830,11 @@ public class Boss {
                 if (code instanceof Number && ((Number) code).intValue() == 0) {
                     sendSuccess = true;
                 } else {
-                    log.warn("列表 securityId 投递失败: {}", directResult);
+                    log.warn("列表 securityId 投递失败，接口返回: {}", directResult);
                 }
             }
             if (sendSuccess) {
+                log.info("纯 JS fetch 投递成功！");
                 return true;
             }
 

@@ -230,6 +230,30 @@ public class PlaywrightManager {
         log.info("Boss 反检测脚本已注入到Context: {}", BOSS_INIT_SCRIPT_RESOURCE);
     }
 
+    private void setupBossJsPatching(BrowserContext targetContext) {
+        log.info("启用 Boss JS 反爬清洗机制...");
+        targetContext.route("**/*.js", route -> {
+            try {
+                com.microsoft.playwright.APIResponse response = route.fetch();
+                byte[] bodyBytes = response.body();
+                if (bodyBytes == null) {
+                    route.resume();
+                    return;
+                }
+                String body = new String(bodyBytes, java.nio.charset.StandardCharsets.UTF_8);
+                
+                String newBody = BossJsPatcher.patch(route.request().url(), body);
+                
+                route.fulfill(new com.microsoft.playwright.Route.FulfillOptions()
+                        .setResponse(response)
+                        .setBody(newBody));
+            } catch (Exception e) {
+                log.warn("JS 补丁处理失败: {}, {}", route.request().url(), e.getMessage());
+                route.resume();
+            }
+        });
+    }
+
     private BrowserContext newUserContext(UserAutomationSession session, String platform) {
         if ("boss".equals(platform)) {
             return newBossPersistentContext(session);
@@ -318,6 +342,12 @@ public class PlaywrightManager {
 
     private void initializeUserContext(Long userId, String platform, BrowserContext targetContext) {
         ensurePlatformHandlers();
+        
+        if ("boss".equals(platform)) {
+            injectBossInitScript(targetContext);
+            setupBossJsPatching(targetContext);
+        }
+
         PlatformPlaywrightHandler handler = platformHandlers.get(platform);
         String domain = handler == null ? domainForPlatform(platform) : handler.domain();
         try {
@@ -404,6 +434,8 @@ public class PlaywrightManager {
      */
     private void setupBossPlatform() {
         log.info("开始初始化Boss直聘平台...");
+        injectBossInitScript(context);
+        setupBossJsPatching(context);
         // 尝试从数据库加载Boss平台Cookie到上下文
         try {
             CookieEntity cookieEntity = cookieService.getCookieByPlatform("boss");
