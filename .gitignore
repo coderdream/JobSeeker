@@ -19,4 +19,8 @@ Thumbs.db
 front/node_modules/
 front/.next/
 front/out/
+front/tsconfig.tsbuildinfo
 .scratch/
+
+# Local SQLite runtime data
+db/getjobs.db
