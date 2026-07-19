@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { Filter, Plus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useAuthedRequest } from '@/components/auth/useAuthedRequest'
@@ -19,6 +20,26 @@ type BossJob = {
   jobUrl?: string
 }
 
+type FilterField = 'keyword' | 'location' | 'experience' | 'degree' | 'salary'
+type FilterOperator = 'contains' | 'equals' | 'notContains' | 'startsWith' | 'endsWith'
+type JobFilter = { id: number; field: FilterField; operator: FilterOperator; value: string }
+type SavedFilter = { id: number; filterName: string; filterConditions: string }
+
+const filterFields: { value: FilterField; label: string }[] = [
+  { value: 'keyword', label: '关键词（岗位/公司/HR）' },
+  { value: 'location', label: '地点' },
+  { value: 'experience', label: '经验' },
+  { value: 'degree', label: '学历' },
+  { value: 'salary', label: '薪资（K）' },
+]
+const filterOperators: { value: FilterOperator; label: string }[] = [
+  { value: 'contains', label: '包含' },
+  { value: 'equals', label: '等于' },
+  { value: 'notContains', label: '不包含' },
+  { value: 'startsWith', label: '开头是' },
+  { value: 'endsWith', label: '结尾是' },
+]
+
 export default function JobList() {
   const { authedFetch } = useAuthedRequest()
   const [items, setItems] = useState<BossJob[]>([])
@@ -29,15 +50,29 @@ export default function JobList() {
   // default to NOT showing Delivered or Discarded
   const [showDelivered, setShowDelivered] = useState(false)
   const [showDiscarded, setShowDiscarded] = useState(false)
+  const [filterOpen, setFilterOpen] = useState(false)
+  const [filters, setFilters] = useState<JobFilter[]>([])
+  const [appliedFilters, setAppliedFilters] = useState<JobFilter[]>([])
+  const [filterName, setFilterName] = useState('')
+  const [savedFilters, setSavedFilters] = useState<SavedFilter[]>([])
   
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
 
+  const loadSavedFilters = useCallback(async () => {
+    try {
+      const res = await authedFetch('/api/boss/filter-conditions')
+      if (res.ok) setSavedFilters(await res.json())
+    } catch (e) { console.error('load saved filters failed', e) }
+  }, [authedFetch])
+
+  useEffect(() => {
+    // Synchronize the saved-filter list with the authenticated API.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadSavedFilters()
+  }, [loadSavedFilters])
+
   const loadList = useCallback(async (toPage: number, toSize: number) => {
     const params = new URLSearchParams()
-    
-    const statuses = []
-    if (showDelivered) statuses.push('已投递')
-    if (showDiscarded) statuses.push('废弃')
     
     const allStatuses = ["未投递", "已投递", "已过滤", "投递失败", "废弃"]
     const requestedStatuses = allStatuses.filter(s => {
@@ -47,6 +82,26 @@ export default function JobList() {
     })
     params.set("statuses", requestedStatuses.join(","))
 
+    // The list API has exact-match parameters for structured fields. Other
+    // operators fall back to its cross-field keyword search until the API
+    // exposes field-level operators.
+    const textFilters = appliedFilters.filter(f => f.field === 'keyword' && f.value.trim())
+    const location = appliedFilters.find(f => f.field === 'location' && f.operator === 'equals' && f.value.trim())
+    const experience = appliedFilters.find(f => f.field === 'experience' && f.operator === 'equals' && f.value.trim())
+    const degree = appliedFilters.find(f => f.field === 'degree' && f.operator === 'equals' && f.value.trim())
+    const salary = appliedFilters.find(f => f.field === 'salary' && f.value.trim())
+    if (textFilters.length) params.set('keyword', textFilters.map(f => f.value.trim()).join(' '))
+    if (location) params.set('location', location.value.trim())
+    if (experience) params.set('experience', experience.value.trim())
+    if (degree) params.set('degree', degree.value.trim())
+    if (salary) {
+      const value = Number(salary.value)
+      if (Number.isFinite(value)) {
+        if (salary.operator === 'equals') { params.set('minK', String(value)); params.set('maxK', String(value)) }
+        if (salary.operator === 'contains' || salary.operator === 'startsWith') params.set('minK', String(value))
+        if (salary.operator === 'endsWith') params.set('maxK', String(value))
+      }
+    }
     params.set("page", String(toPage))
     params.set("size", String(toSize))
 
@@ -61,9 +116,11 @@ export default function JobList() {
     } catch (e) {
       console.error("fetch list failed", e)
     }
-  }, [authedFetch, showDelivered, showDiscarded])
+  }, [authedFetch, showDelivered, showDiscarded, appliedFilters])
 
   useEffect(() => {
+    // The list is an external data source synchronized with the current query state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadList(page, size)
   }, [loadList, page, size])
 
@@ -150,7 +207,7 @@ export default function JobList() {
 
   const toggleSelectAll = (checked: boolean) => {
     if (checked) {
-      setSelectedIds(new Set(items.map(it => it.id)))
+                      setSelectedIds(new Set(visibleItems.map(it => it.id)))
     } else {
       setSelectedIds(new Set())
     }
@@ -163,11 +220,73 @@ export default function JobList() {
     setSelectedIds(newSet)
   }
 
+  const applyFilters = () => {
+    setAppliedFilters(filters.filter(f => f.value.trim()))
+    setPage(1)
+  }
+
+  const saveFilter = async () => {
+    const conditions = filters.filter(f => f.value.trim())
+    if (!filterName.trim()) return alert('请输入筛选条件名')
+    if (conditions.length === 0) return alert('请先添加筛选条件')
+    try {
+      const res = await authedFetch('/api/boss/filter-conditions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filterName: filterName.trim(), filterConditions: JSON.stringify(conditions) })
+      })
+      if (!res.ok) throw new Error('save failed')
+      setFilterName('')
+      await loadSavedFilters()
+      alert('筛选条件已保存')
+    } catch (e) { console.error(e); alert('保存筛选条件失败') }
+  }
+
+  const applySavedFilter = (saved: SavedFilter) => {
+    try {
+      const conditions = JSON.parse(saved.filterConditions) as JobFilter[]
+      if (!Array.isArray(conditions)) throw new Error('invalid conditions')
+      setFilters(conditions)
+      setAppliedFilters(conditions.filter(f => f.value.trim()))
+      setFilterName(saved.filterName)
+      setFilterOpen(true)
+      setPage(1)
+    } catch (e) { console.error(e); alert('筛选条件格式无效') }
+  }
+
+  const clearFilters = () => {
+    setFilters([])
+    setAppliedFilters([])
+    setPage(1)
+  }
+
+  const toggleFilterPanel = () => {
+    setFilterOpen(open => {
+      if (!open && filters.length === 0) setFilters([{ id: Date.now(), field: 'keyword', operator: 'contains', value: '' }])
+      return !open
+    })
+  }
+
+  const matchesFilter = (job: BossJob, filter: JobFilter) => {
+    const raw = filter.field === 'keyword'
+      ? [job.jobName, job.companyName, job.hrName].filter(Boolean).join(' ')
+      : filter.field === 'salary' ? job.salary : job[filter.field]
+    const actual = String(raw ?? '').trim().toLowerCase()
+    const expected = filter.value.trim().toLowerCase()
+    if (!expected || filter.field === 'salary') return true
+    if (filter.operator === 'equals') return actual === expected
+    if (filter.operator === 'notContains') return !actual.includes(expected)
+    if (filter.operator === 'startsWith') return actual.startsWith(expected)
+    if (filter.operator === 'endsWith') return actual.endsWith(expected)
+    return actual.includes(expected)
+  }
+
+  const visibleItems = items.filter(job => appliedFilters.every(filter => matchesFilter(job, filter)))
+
   return (
     <Card className="mt-4">
       <CardHeader>
         <CardTitle className="text-base flex justify-between items-center">
-          职位列表
+          <span className="flex items-center gap-2">职位列表 <Button size="sm" variant={filterOpen ? 'default' : 'outline'} onClick={toggleFilterPanel}><Filter /> 筛选</Button></span>
           <div className="flex gap-4 text-sm font-normal">
             <label className="flex items-center gap-1 cursor-pointer">
               <input type="checkbox" checked={showDelivered} onChange={e => { setShowDelivered(e.target.checked); setPage(1); }} /> 
@@ -181,6 +300,35 @@ export default function JobList() {
         </CardTitle>
       </CardHeader>
       <CardContent>
+        {filterOpen && (
+          <div className="mb-4 rounded-md border bg-slate-50 p-3 dark:bg-slate-900">
+            <div className="mb-2 flex items-center justify-between text-sm font-semibold"><span>筛选条件</span><span className="text-xs font-normal text-muted-foreground">多个条件同时满足</span></div>
+            <div className="space-y-2">
+              {filters.map((filter, index) => (
+                <div key={filter.id} className="flex flex-wrap items-center gap-2">
+                  <select value={filter.field} onChange={e => setFilters(prev => prev.map(f => f.id === filter.id ? { ...f, field: e.target.value as FilterField } : f))} className="h-9 min-w-[170px] rounded-md border bg-background px-2 text-sm">{filterFields.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}</select>
+                  <select value={filter.operator} onChange={e => setFilters(prev => prev.map(f => f.id === filter.id ? { ...f, operator: e.target.value as FilterOperator } : f))} className="h-9 min-w-[100px] rounded-md border bg-background px-2 text-sm">{filterOperators.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
+                  <input value={filter.value} onChange={e => setFilters(prev => prev.map(f => f.id === filter.id ? { ...f, value: e.target.value } : f))} placeholder={filter.field === 'salary' ? '例如 15' : '输入筛选值'} className="h-9 min-w-[180px] flex-1 rounded-md border bg-background px-3 text-sm" />
+                  <Button size="icon" variant="ghost" title="删除条件" onClick={() => setFilters(prev => prev.filter(f => f.id !== filter.id))}><X /></Button>
+                  {index < filters.length - 1 && <span className="basis-full pl-2 text-xs text-muted-foreground">并且</span>}
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => setFilters(prev => [...prev, { id: Date.now(), field: 'keyword', operator: 'contains', value: '' }])}><Plus /> 添加条件</Button>
+              <Button size="sm" onClick={applyFilters}>应用筛选</Button>
+              <Button size="sm" variant="ghost" onClick={clearFilters}>清空</Button>
+              <input value={filterName} onChange={e => setFilterName(e.target.value)} placeholder="筛选条件名" className="h-9 min-w-[160px] rounded-md border bg-background px-3 text-sm" />
+              <Button size="sm" variant="outline" onClick={saveFilter}>保存为筛选条件</Button>
+            </div>
+          </div>
+        )}
+        <div className="mb-4 flex items-center gap-2 text-sm">
+          <span className="font-semibold">筛选列表</span>
+          {savedFilters.length === 0 ? <span className="text-muted-foreground">暂无保存的筛选条件</span> : savedFilters.map(saved => (
+            <Button key={saved.id} size="sm" variant={saved.filterName === filterName ? 'default' : 'outline'} onClick={() => applySavedFilter(saved)}>{saved.filterName}</Button>
+          ))}
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left border-collapse">
             <thead>
@@ -188,10 +336,10 @@ export default function JobList() {
                 <th className="p-2 whitespace-nowrap w-8">
                   <input 
                     type="checkbox" 
-                    checked={items.length > 0 && selectedIds.size === items.length}
+                    checked={visibleItems.length > 0 && selectedIds.size === visibleItems.length}
                     ref={input => {
                       if (input) {
-                        input.indeterminate = selectedIds.size > 0 && selectedIds.size < items.length
+                        input.indeterminate = selectedIds.size > 0 && selectedIds.size < visibleItems.length
                       }
                     }}
                     onChange={e => toggleSelectAll(e.target.checked)}
@@ -215,7 +363,7 @@ export default function JobList() {
               </tr>
             </thead>
             <tbody>
-              {items.map(job => (
+              {visibleItems.map(job => (
                 <tr key={job.id} className="border-b hover:bg-slate-50 dark:hover:bg-slate-800">
                   <td className="p-2">
                     <input 
@@ -247,7 +395,7 @@ export default function JobList() {
                   </td>
                 </tr>
               ))}
-              {items.length === 0 && (
+              {visibleItems.length === 0 && (
                 <tr>
                   <td colSpan={10} className="p-4 text-center text-gray-500">暂无数据</td>
                 </tr>
