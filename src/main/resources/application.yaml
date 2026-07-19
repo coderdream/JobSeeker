@@ -28,6 +28,9 @@ server:
   port: 8889
 
 logging:
+  charset:
+    console: UTF-8
+    file: UTF-8
   level:
     root: INFO
   pattern:
@@ -36,6 +39,7 @@ logging:
     name: ./target/logs/get-jobs.log
   logback:
     rollingpolicy:
+      file-name-pattern: ./target/logs/get-jobs-%d{yyyy-MM-dd}.%i.log
       max-history: 30
       max-file-size: 10MB
 

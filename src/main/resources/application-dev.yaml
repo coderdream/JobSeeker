@@ -12,6 +12,9 @@ spring:
     baseline-on-migrate: true
 
 logging:
+  charset:
+    console: UTF-8
+    file: UTF-8
   level:
     org.springframework.security: INFO
     org.flywaydb: INFO

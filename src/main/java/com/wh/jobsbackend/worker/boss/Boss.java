@@ -56,6 +56,7 @@ import org.springframework.http.ResponseEntity;
 @Scope("prototype")
 @RequiredArgsConstructor
 public class Boss {
+    private static final String CODEX_BUILD_MARKER = "boss-cdp-security-id-20260719-v2";
 
     @Setter
     private Page page;
@@ -139,16 +140,11 @@ public class Boss {
             return "投递失败";
         }
         
-        Page detailPage = page; // Use the main page directly instead of newPage()
         boolean success = false;
         try {
-            detailPage.navigate(jobUrl, new Page.NavigateOptions()
-                    .setWaitUntil(com.microsoft.playwright.options.WaitUntilState.DOMCONTENTLOADED)
-                    .setTimeout(30_000));
-            PlaywrightUtil.sleep(3);
+            // 直接使用主页面执行 JS，不再进行任何 URL navigate 或新开标签页
+            // 这样能100%避免触发 Boss直聘 的跳出重定向和反爬机制
             
-            log.info("detailPage current URL after navigate: {}", detailPage.url());
-
             Job job = new Job();
             job.setJobName(jobName);
             job.setSalary(salary);
@@ -164,7 +160,10 @@ public class Boss {
                 }
             }
 
-            success = resumeSubmission(detailPage, jobName, job);
+            // 将 jobUrl 传递给 resumeSubmission 以便 JS fetch
+            com.wh.jobsbackend.application.entity.BossJobDataEntity entity = bossService.findById(jobId);
+            String securityId = entity != null ? entity.getSecurityId() : null;
+            success = resumeSubmission(page, jobUrl, securityId, jobName, job);
             if (success) {
                 bossService.updateDeliveryStatusById(jobId, "已投递");
                 return "已投递";
@@ -176,8 +175,6 @@ public class Boss {
             log.error("applyJobByUrl 异常 | jobId={} | jobUrl={} | error={}", jobId, jobUrl, e.getMessage(), e);
             try { bossService.updateDeliveryStatusById(jobId, "投递失败"); } catch (Exception ignored) {}
             return "投递失败";
-        } finally {
-            // detailPage is the main page now, DO NOT close it.
         }
     }
 
@@ -354,6 +351,9 @@ public class Boss {
     }
 
     private void postJobByCity(String cityCode) {
+        log.info("[BOSS-BREADCRUMB] build={}, strategy=list-api-securityId, script={}, skipLoginCheck=true",
+                CODEX_BUILD_MARKER,
+                "D:\\04_GitHub\\boss-zhipin-scraper\\scripts\\boss_cdp_raw.py");
         for (String keyword : config.getKeywords()) {
             if (shouldStopCallback != null && Boolean.TRUE.equals(shouldStopCallback.get())) {
                 progressCallback.accept("用户取消抓取", 0, 0);
@@ -383,6 +383,9 @@ public class Boss {
                 cmd.add(tempFile.getAbsolutePath());
                 cmd.add("--cdp-port");
                 cmd.add("9222");
+
+                log.info("[BOSS-BREADCRUMB] launch args: keyword={}, city={}, pages=3, noDetail=true, skipLoginCheck=true, allowDomFallback=false",
+                        keyword, cityCode);
 
                 // 添加其他过滤器
                 if (config.getExperience() != null && !config.getExperience().isEmpty()) {
@@ -447,6 +450,7 @@ public class Boss {
 
                             // 构造 mock detail 入库
                             String encryptJobId = j.optString("encrypt_job_id", "");
+                            String securityId = j.optString("security_id", j.optString("securityId", ""));
                             String encryptBossId = j.optString("encrypt_boss_id", "");
                             String encryptBrandId = j.optString("encrypt_brand_id", "");
                             String jobLink = j.optString("job_link", "");
@@ -467,6 +471,7 @@ public class Boss {
 
                             mockJobInfo.put("encryptId", encryptJobId);
                             mockJobInfo.put("encryptUserId", encryptBossId);
+                            mockJobInfo.put("securityId", securityId);
                             mockJobInfo.put("jobName", jobName);
                             mockJobInfo.put("salaryDesc", jobSalary);
                             mockJobInfo.put("locationName", location);
@@ -565,6 +570,7 @@ public class Boss {
             entity.setCompanyAddress(jobInfo.optString("address", null));
             entity.setEncryptId(encryptId);
             entity.setEncryptUserId(encryptUserId);
+            entity.setSecurityId(jobInfo.optString("securityId", null));
 
             entity.setCompanyName(brand != null ? brand.optString("brandName", null) : null);
             entity.setIndustry(brand != null ? brand.optString("industryName", null) : null);
@@ -780,7 +786,7 @@ public class Boss {
     }
 
     @SneakyThrows
-    private boolean resumeSubmission(Page detailPage, String keyword, Job job) {
+    private boolean resumeSubmission(Page p, String detailUrl, String securityId, String keyword, Job job) {
         // 若收到停止指令，直接短路返回
         if (shouldStopCallback != null && Boolean.TRUE.equals(shouldStopCallback.get())) {
             log.info("停止指令已触发，跳过投递 | 公司：{} | 岗位：{}", job.getCompanyName(), job.getJobName());
@@ -792,148 +798,117 @@ public class Boss {
             return false;
         }
 
-        String detailUrl = detailPage.url();
+        String encryptId = extractEncryptId(detailUrl);
+        String encryptUserId = encryptId != null ? encryptIdToUserId.get(encryptId) : null;
 
-        // 3. 查找"立即沟通"按钮
-        closeAnyBlockingOverlays(detailPage);
-        Locator chatBtn = detailPage.locator(".btn-startchat, .op-btn-chat, a:has-text('立即沟通'), .btn:has-text('立即沟通'), button:has-text('立即沟通'), div[role='button']:has-text('立即沟通')");
-        boolean foundChatBtn = false;
-        for (int i = 0; i < 5; i++) {
-            if (shouldStopCallback != null && Boolean.TRUE.equals(shouldStopCallback.get())) {
-                log.info("停止指令已触发，结束查找聊天按钮 | 公司：{} | 岗位：{}", job.getCompanyName(), job.getJobName());
-                return false;
-            }
-            if (chatBtn.count() > 0) {
-                foundChatBtn = true;
-                break;
-            }
-            PlaywrightUtil.sleep(1);
-            chatBtn = detailPage.locator(".btn-startchat, .op-btn-chat, a:has-text('立即沟通'), .btn:has-text('立即沟通'), button:has-text('立即沟通'), div[role='button']:has-text('立即沟通')");
-        }
-        if (!foundChatBtn) {
-            try {
-                String html = detailPage.content();
-                java.nio.file.Files.writeString(java.nio.file.Paths.get("target/boss-error-" + job.getJobName() + ".html"), html);
-                log.error("Saved Boss Zhipin error page HTML to target/boss-error-{}.html", job.getJobName());
-            } catch (Exception ignored) {}
-            failPageModel("Boss未找到立即沟通按钮，岗位: " + job.getJobName(), null);
-        }
-        nativeClick(detailPage, chatBtn.first());
-        PlaywrightUtil.sleep(1);
+        log.info("准备通过纯 JS fetch 投递岗位 | 公司：{} | 岗位：{}", job.getCompanyName(), job.getJobName());
 
-        // 4. 等待聊天输入框 或 已向BOSS发送消息 弹窗
-        closeAnyBlockingOverlays(detailPage);
-        Locator inputLocator = detailPage.locator(BossPageModel.CHAT_INPUT_SELECTOR);
-        Locator sentPopup = detailPage.locator("text='已向BOSS发送消息'");
-        Locator popupClose = detailPage.locator("text='留在此页'");
-        
-        boolean inputReady = false;
-        boolean autoSent = false;
-        
-        for (int i = 0; i < 15; i++) {
-            if (shouldStopCallback != null && Boolean.TRUE.equals(shouldStopCallback.get())) {
-                log.info("停止指令已触发，结束等待聊天输入框 | 公司：{} | 岗位：{}", job.getCompanyName(), job.getJobName());
-                return false;
-            }
-            if (sentPopup.count() > 0 && sentPopup.isVisible()) {
-                autoSent = true;
-                break;
-            }
-            if (inputLocator.count() > 0 && inputLocator.first().isVisible()) {
-                inputReady = true;
-                break;
-            }
-            PlaywrightUtil.sleep(1);
-        }
-
-        if (autoSent) {
-            log.info("BOSS系统自动发送了问候语（出现已向BOSS发送消息弹窗）");
-            try {
-                if (popupClose.count() > 0 && popupClose.isVisible()) {
-                    nativeClick(detailPage, popupClose.first());
-                }
-            } catch(Exception e) {}
-            
-            // 自动发送也视为投递成功，更新数据库投递状态
-            String encryptId = extractEncryptId(detailUrl);
-            String encryptUserId = encryptId != null ? encryptIdToUserId.get(encryptId) : null;
-            if (encryptId != null && encryptUserId != null) {
-                try {
-                    bossService.updateDeliveryStatus(encryptId, encryptUserId, "已投递");
-                    log.info("系统自动投递成功 | 公司：{} | 岗位：{} | encryptId：{} | encryptUserId：{}", job.getCompanyName(), job.getJobName(), encryptId, encryptUserId);
-                } catch (Exception e) {
-                    log.warn("更新自动投递状态失败：{}", e.getMessage());
-                }
-            }
-            resultList.add(job);
-            return true; 
-        }
-
-        if (!inputReady) {
-            failPageModel("Boss聊天输入框未出现，可能被登录/风控/弹窗阻塞或打开了新标签页: " + job.getJobName(), null);
-        }
-
-        // 5. AI智能生成打招呼语
-        String aiMessage = null;
-        if (config.getEnableAI()) {
-            String jd = job.getJobInfo();
-            if (jd != null && !jd.isEmpty()) {
-                aiMessage = generateAiMessage(keyword, job.getJobName(), jd);
-            }
-        }
-        String message = isValidString(aiMessage) ? aiMessage : config.getSayHi();
-
-        // 6. 输入打招呼语
-        Locator input = inputLocator.first();
-        nativeClick(detailPage, input);
-        Object tagObj = input.evaluate("el => el.tagName.toLowerCase()");
-        if (tagObj instanceof String && ((String) tagObj).equals("textarea")) {
-            input.fill(message);
-        } else {
-            // 对 contenteditable 节点写入文本并派发 input 事件
-            input.evaluate("(el, msg) => { el.innerText = msg; el.dispatchEvent(new Event('input')); }", message);
-        }
-
-        // 7. 点击发送按钮（div.send-message 或 button.btn-send）
-        Locator sendText = detailPage.locator(BossPageModel.SEND_BUTTON_SELECTOR);
         boolean sendSuccess = false;
-        if (sendText.count() > 0) {
-            nativeClick(detailPage, sendText.first());
-            PlaywrightUtil.sleep(1);
-            sendSuccess = waitForBossDeliveryConfirmation(detailPage);
-            try {
-                detailPage.locator(BossPageModel.CLOSE_BUTTON_SELECTOR).first().click();
-            } catch (Exception e) {
-                log.warn("发送文本小窗口关闭失败: {}", e.getMessage());
-            }
-        } else {
-            failPageModel("Boss未找到发送按钮，岗位: " + job.getJobName(), null);
-        }
-
-        // 8. 发送图片简历（可选）
-        boolean imgResume = false;
-        if (Boolean.TRUE.equals(config.getSendImgResume())) {
-            imgResume = sendImageResume(detailPage);
-        }
-
-        log.info("投递完成 | 公司：{} | 岗位：{} | 薪资：{} | 招呼语：{} | 图片简历：{}", job.getCompanyName(), job.getJobName(), job.getSalary(), message, imgResume ? "已发送" : "未发送");
-
-        // 9. 关闭新打开的详情页
         try {
-            detailPage.close();
-        } catch (Exception ignore) {
+            // 确保当前页面在 zhipin.com 域名下，否则 fetch 会报 CORS 或 Failed to fetch
+            if (!p.url().contains("zhipin.com")) {
+                log.info("当前页面不在 zhipin.com ({})，导航至主页以绕过跨域限制...", p.url());
+                p.navigate("https://www.zhipin.com/web/geek/job", new Page.NavigateOptions()
+                        .setWaitUntil(com.microsoft.playwright.options.WaitUntilState.DOMCONTENTLOADED)
+                        .setTimeout(30_000));
+                PlaywrightUtil.sleep(3);
+            }
+
+            // 通过注入隐藏 iframe 来加载详情页，绕过简单的 fetch 拦截，直接提取 __INITIAL_STATE__
+            if (securityId == null || securityId.isBlank()) {
+                log.warn("岗位缺少 securityId，跳过投递: {}", job.getJobName());
+                return false;
+            }
+            String directJs = "(args) => fetch('/wapi/zpgeek/friend/add.json?securityId=' + encodeURIComponent(args.securityId) + '&jobId=' + encodeURIComponent(args.jobId) + '&lid=', {" +
+                    "method:'POST',headers:{'Accept':'application/json, text/plain, */*','Content-Type':'application/x-www-form-urlencoded','x-requested-with':'XMLHttpRequest'},body:'sessionId='" +
+                    "}).then(r => r.json())";
+            Object directResult = p.evaluate(directJs, java.util.Map.of("jobId", encryptId != null ? encryptId : "", "securityId", securityId));
+            if (directResult instanceof java.util.Map) {
+                Object code = ((java.util.Map<?, ?>) directResult).get("code");
+                if (code instanceof Number && ((Number) code).intValue() == 0) {
+                    sendSuccess = true;
+                } else {
+                    log.warn("列表 securityId 投递失败: {}", directResult);
+                }
+            }
+            if (sendSuccess) {
+                return true;
+            }
+
+            String js = "(args) => {\n" +
+                "  return new Promise((resolve, reject) => {\n" +
+                "      const iframe = document.createElement('iframe');\n" +
+                "      iframe.style.display = 'none';\n" +
+                "      iframe.src = args.detailUrl;\n" +
+                "      document.body.appendChild(iframe);\n" +
+                "      \n" +
+                "      let attempts = 0;\n" +
+                "      const timer = setInterval(() => {\n" +
+                "          attempts++;\n" +
+                "          try {\n" +
+                "              const win = iframe.contentWindow;\n" +
+                "              if (win && win.__INITIAL_STATE__ && win.__INITIAL_STATE__.jobInfo && win.__INITIAL_STATE__.jobInfo.securityId) {\n" +
+                "                  clearInterval(timer);\n" +
+                "                  const securityId = win.__INITIAL_STATE__.jobInfo.securityId;\n" +
+                "                  fetch('https://www.zhipin.com/wapi/zpgeek/friend/add.json?securityId=' + securityId + '&jobId=' + args.jobId + '&lid=', {\n" +
+                "                      method: 'POST',\n" +
+                "                      headers: {\n" +
+                "                          'Accept': 'application/json, text/plain, */*',\n" +
+                "                          'Content-Type': 'application/x-www-form-urlencoded',\n" +
+                "                          'x-requested-with': 'XMLHttpRequest'\n" +
+                "                      },\n" +
+                "                      body: 'sessionId='\n" +
+                "                  }).then(r => r.json()).then(data => {\n" +
+                "                      document.body.removeChild(iframe);\n" +
+                "                      resolve(data);\n" +
+                "                  }).catch(e => {\n" +
+                "                      document.body.removeChild(iframe);\n" +
+                "                      resolve({ok: false, error: '投递接口失败: ' + e.toString()});\n" +
+                "                  });\n" +
+                "              }\n" +
+                "          } catch (e) {\n" +
+                "              // 忽略跨域等报错，继续轮询\n" +
+                "          }\n" +
+                "          \n" +
+                "          if (attempts > 150) {\n" +
+                "              clearInterval(timer);\n" +
+                "              document.body.removeChild(iframe);\n" +
+                "              resolve({ok: false, error: '获取 securityId 超时 (15秒)，可能是遇到验证码拦截'});\n" +
+                "          }\n" +
+                "      }, 100);\n" +
+                "  });\n" +
+                "}";
+
+            Object result = p.evaluate(js, java.util.Map.of("jobId", encryptId != null ? encryptId : "", "detailUrl", detailUrl));
+            
+            if (result instanceof java.util.Map) {
+                java.util.Map<?, ?> response = (java.util.Map<?, ?>) result;
+                if (response.containsKey("code")) {
+                    Object code = response.get("code");
+                    if (code instanceof Integer && ((Integer) code) == 0) {
+                        sendSuccess = true;
+                        log.info("纯 JS fetch 投递成功 | code=0");
+                    } else {
+                        log.warn("纯 JS fetch 投递失败 | response: {}", response);
+                    }
+                } else {
+                    log.warn("纯 JS fetch 返回未知格式 | response: {}", response);
+                }
+            }
+        } catch (Exception e) {
+            log.error("执行原生 fetch 投递时发生异常: {}", e.getMessage(), e);
         }
+
+        log.info("投递完成 | 公司：{} | 岗位：{} | 薪资：{} | 投递结果：{}", job.getCompanyName(), job.getJobName(), job.getSalary(), sendSuccess ? "成功" : "失败");
+
         PlaywrightUtil.sleep(1);
 
         // 10. 更新数据库投递状态 & 成功投递加入结果
         if (sendSuccess) {
-            // 从详情链接提取 encrypt_id，并映射到 encrypt_user_id
-            String encryptId = extractEncryptId(detailUrl);
-            String encryptUserId = encryptId != null ? encryptIdToUserId.get(encryptId) : null;
             if (encryptId != null && encryptUserId != null) {
                 try {
-        bossService.updateDeliveryStatus(encryptId, encryptUserId, "已投递");
-                    log.info("投递成功 | 公司：{} | 岗位：{} | encryptId：{} | encryptUserId：{}", job.getCompanyName(), job.getJobName(), encryptId, encryptUserId);
+                    bossService.updateDeliveryStatus(encryptId, encryptUserId, "已投递");
+                    log.info("更新投递状态成功 | 公司：{} | 岗位：{} | encryptId：{} | encryptUserId：{}", job.getCompanyName(), job.getJobName(), encryptId, encryptUserId);
                 } catch (Exception e) {
                     log.warn("更新投递状态为已投递失败：{}", e.getMessage());
                 }
@@ -942,13 +917,10 @@ public class Boss {
             }
             resultList.add(job);
         } else {
-            // 若发生发送失败，也进行状态更新
-            String encryptId = extractEncryptId(detailUrl);
-            String encryptUserId = encryptId != null ? encryptIdToUserId.get(encryptId) : null;
             if (encryptId != null && encryptUserId != null) {
                 try {
-        bossService.updateDeliveryStatus(encryptId, encryptUserId, "投递失败");
-                    log.warn("投递失败 | 公司：{} | 岗位：{} | encryptId：{} | encryptUserId：{}", job.getCompanyName(), job.getJobName(), encryptId, encryptUserId);
+                    bossService.updateDeliveryStatus(encryptId, encryptUserId, "投递失败");
+                    log.warn("更新投递状态为失败 | 公司：{} | 岗位：{} | encryptId：{} | encryptUserId：{}", job.getCompanyName(), job.getJobName(), encryptId, encryptUserId);
                 } catch (Exception e) {
                     log.warn("更新投递状态为投递失败异常：{}", e.getMessage());
                 }

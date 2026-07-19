@@ -9,8 +9,10 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 @EnableAsync
 public class JobsBackendApplication {
+    private static final String CODEX_BUILD_MARKER = "boss-cdp-security-id-20260719-v2";
 
     public static void main(String[] args) {
+        System.out.println("[BOOT-BREADCRUMB] build=" + CODEX_BUILD_MARKER);
         SpringApplication.run(JobsBackendApplication.class, args);
     }
 

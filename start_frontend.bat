@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 > nul
 title JobSeeker Frontend
 cd /d D:\04_GitHub\JobSeeker\front
 echo Starting Next.js frontend...

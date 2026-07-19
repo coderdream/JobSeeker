@@ -160,6 +160,7 @@ CREATE TABLE IF NOT EXISTS hub_boss_data (
     user_id INTEGER REFERENCES hub_user(id),
     encrypt_id TEXT,
     encrypt_user_id TEXT,
+    security_id TEXT,
     company_name TEXT,
     job_name TEXT,
     salary TEXT,

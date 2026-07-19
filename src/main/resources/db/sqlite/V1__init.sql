@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS hub_boss_data (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     encrypt_id TEXT,
     encrypt_user_id TEXT,
+    security_id TEXT,
     company_name TEXT,
     job_name TEXT,
     salary TEXT,

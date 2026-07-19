@@ -23,6 +23,9 @@ public class BossJobDataEntity {
     @TableField("encrypt_user_id")
     private String encryptUserId;
 
+    @TableField("security_id")
+    private String securityId;
+
     @TableField("company_name")
     private String companyName;
 
