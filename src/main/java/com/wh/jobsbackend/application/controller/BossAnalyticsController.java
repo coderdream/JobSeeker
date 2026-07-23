@@ -1,6 +1,8 @@
 package com.wh.jobsbackend.application.controller;
 
 import com.wh.jobsbackend.application.service.BossService;
+import com.wh.jobsbackend.application.entity.BossFilterConditionEntity;
+import com.wh.jobsbackend.application.security.CurrentUserService;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Arrays;
@@ -14,9 +16,26 @@ import java.util.stream.Collectors;
 public class BossAnalyticsController {
 
     private final BossService bossService;
+    private final CurrentUserService currentUserService;
 
-    public BossAnalyticsController(BossService bossService) {
+    public BossAnalyticsController(BossService bossService, CurrentUserService currentUserService) {
         this.bossService = bossService;
+        this.currentUserService = currentUserService;
+    }
+
+    @GetMapping("/filter-conditions")
+    public List<BossFilterConditionEntity> listFilterConditions() {
+        return bossService.listFilterConditions(currentUserService.requireUserId());
+    }
+
+    @PostMapping("/filter-conditions")
+    public BossFilterConditionEntity saveFilterCondition(@RequestBody Map<String, String> body) {
+        String name = body.get("filterName");
+        String conditions = body.get("filterConditions");
+        if (name == null || name.trim().isEmpty() || conditions == null || conditions.trim().isEmpty()) {
+            throw new IllegalArgumentException("筛选名称和筛选条件不能为空");
+        }
+        return bossService.saveFilterCondition(currentUserService.requireUserId(), name.trim(), conditions);
     }
 
     /**

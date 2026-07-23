@@ -13,7 +13,7 @@ module.exports = {
     // 是否自动打开浏览器
     open: true,
     // 绑定到 IPv4 避免在 Windows 上 ::1 权限问题
-    hostname: '127.0.0.1',
+    hostname: '0.0.0.0',
   },
 
   // 生产环境配置
@@ -27,7 +27,7 @@ module.exports = {
   // API 配置（如果需要在构建时使用）
   api: {
     // 后端 API 地址固定在 8888 端口
-    baseUrl: 'http://localhost:8889',
+    baseUrl: 'http://100.96.199.26:8889',
   },
 
   // 其他自定义配置

@@ -207,8 +207,14 @@ public class Boss {
             tempOutputFile.deleteOnExit();
 
             List<String> cmd = new ArrayList<>();
-            cmd.add("D:\\04_GitHub\\boss-zhipin-scraper\\.venv\\Scripts\\python.exe");
-            cmd.add("D:\\04_GitHub\\boss-zhipin-scraper\\scripts\\boss_cdp_raw.py");
+            String os = System.getProperty("os.name").toLowerCase();
+            if (os.contains("win")) {
+                cmd.add("D:\\04_GitHub\\boss-zhipin-scraper\\.venv\\Scripts\\python.exe");
+                cmd.add("D:\\04_GitHub\\boss-zhipin-scraper\\scripts\\boss_cdp_raw.py");
+            } else {
+                cmd.add("/Volumes/System/04_GitHub/boss-zhipin-scraper/.venv/bin/python");
+                cmd.add("/Volumes/System/04_GitHub/boss-zhipin-scraper/scripts/boss_cdp_raw.py");
+            }
             cmd.add("--input");
             cmd.add(tempInputFile.getAbsolutePath());
             cmd.add("--detail");
@@ -353,7 +359,7 @@ public class Boss {
     }
 
     private void postJobByCity(String cityCode) {
-        log.info("[BOSS-BREADCRUMB] build={}, strategy=list-api-securityId, script={}, skipLoginCheck=true",
+        log.info("[BOSS-BREADCRUMB] build={}, strategy=list-api-securityId, script={}",
                 CODEX_BUILD_MARKER,
                 "D:\\04_GitHub\\boss-zhipin-scraper\\scripts\\boss_cdp_raw.py");
         for (String keyword : config.getKeywords()) {
@@ -364,16 +370,20 @@ public class Boss {
 
             log.info("开始使用Python CDP抓取职位列表: keyword={}, city={}", keyword, cityCode);
             progressCallback.accept("开始抓取关键词: " + keyword, 0, 0);
-
-            try {
+            try {
                 // 创建临时输出文件
                 java.io.File tempFile = java.io.File.createTempFile("boss_jobs_" + keyword + "_", ".json");
                 tempFile.deleteOnExit();
 
                 List<String> cmd = new ArrayList<>();
-                cmd.add("D:\\04_GitHub\\boss-zhipin-scraper\\.venv\\Scripts\\python.exe");
-                cmd.add("D:\\04_GitHub\\boss-zhipin-scraper\\scripts\\boss_cdp_raw.py");
-                cmd.add("--skip-login-check");
+                String os = System.getProperty("os.name").toLowerCase();
+                if (os.contains("win")) {
+                    cmd.add("D:\\04_GitHub\\boss-zhipin-scraper\\.venv\\Scripts\\python.exe");
+                    cmd.add("D:\\04_GitHub\\boss-zhipin-scraper\\scripts\\boss_cdp_raw.py");
+                } else {
+                    cmd.add("/Volumes/System/04_GitHub/boss-zhipin-scraper/.venv/bin/python");
+                    cmd.add("/Volumes/System/04_GitHub/boss-zhipin-scraper/scripts/boss_cdp_raw.py");
+                }
                 cmd.add("--keyword");
                 cmd.add(keyword);
                 cmd.add("--city");
@@ -386,7 +396,7 @@ public class Boss {
                 cmd.add("--cdp-port");
                 cmd.add("9222");
 
-                log.info("[BOSS-BREADCRUMB] launch args: keyword={}, city={}, pages=3, noDetail=true, skipLoginCheck=true, allowDomFallback=false",
+                log.info("[BOSS-BREADCRUMB] launch args: keyword={}, city={}, pages=3, noDetail=true, allowDomFallback=false",
                         keyword, cityCode);
 
                 // 添加其他过滤器
@@ -456,6 +466,14 @@ public class Boss {
                             String encryptBossId = j.optString("encrypt_boss_id", "");
                             String encryptBrandId = j.optString("encrypt_brand_id", "");
                             String jobLink = j.optString("job_link", "");
+
+                            // securityId 是 Boss 直投接口的必要参数。没有它的岗位无法投递，
+                            // 不应保存为可投递岗位，避免后续批量投递必然失败。
+                            if (securityId.isBlank()) {
+                                log.warn("列表岗位缺少 securityId，跳过入库: {} | {}", bossCompany, jobName);
+                                progressCallback.accept("跳过无 securityId 岗位: " + jobName, i + 1, count);
+                                continue;
+                            }
 
                             String experience = "";
                             String degree = "";
@@ -619,8 +637,15 @@ public class Boss {
         exists = bossService.existsBossJobByEncryptId(encryptId);
                     }
                     if (!exists) {
-        bossService.insertBossJob(entity);
+                        bossService.insertBossJob(entity);
                         log.debug("岗位入库：{} | 公司：{} | HR：{} | 状态：{}", entity.getJobName(), entity.getCompanyName(), entity.getHrName(), entity.getDeliveryStatus());
+                    } else if (entity.getSecurityId() != null && !entity.getSecurityId().isBlank()) {
+                        // 详情抓取可能晚于列表入库，历史记录也必须回填 securityId。
+                        com.wh.jobsbackend.application.entity.BossJobDataEntity existing = bossService.findByEncryptId(encryptId, encryptUserId);
+                        if (existing != null && (existing.getSecurityId() == null || existing.getSecurityId().isBlank())) {
+                            bossService.updateSecurityIdById(existing.getId(), entity.getSecurityId());
+                            log.info("已回填岗位 securityId：{}", entity.getJobName());
+                        }
                     }
                 } catch (Exception e) {
                     log.warn("岗位入库失败：{}", e.getMessage());

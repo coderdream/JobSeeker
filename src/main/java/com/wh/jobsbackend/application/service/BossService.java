@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import com.wh.jobsbackend.application.security.CurrentUserService;
+import jakarta.annotation.PostConstruct;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -36,9 +37,43 @@ public class BossService {
     private final BossConfigMapper bossConfigMapper;
     private final BlacklistMapper blacklistMapper;
     private final BossJobDataMapper bossJobDataMapper;
+    private final BossFilterConditionMapper bossFilterConditionMapper;
     private final DataSource dataSource;
     private final ReferenceDataService referenceDataService;
     private final CurrentUserService currentUserService;
+
+    /** Portable SQLite profile disables Flyway, so keep this schema creation idempotent. */
+    @PostConstruct
+    public void ensureFilterConditionTable() {
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE IF NOT EXISTS hub_boss_filter_condition (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                    "user_id INTEGER NOT NULL, " +
+                    "filter_name TEXT NOT NULL, " +
+                    "filter_conditions TEXT NOT NULL, " +
+                    "created_at TEXT, updated_at TEXT)");
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_boss_filter_condition_user " +
+                    "ON hub_boss_filter_condition(user_id)");
+        } catch (Exception e) {
+            log.error("初始化Boss筛选条件表失败", e);
+        }
+    }
+
+    public List<BossFilterConditionEntity> listFilterConditions(Long userId) {
+        return bossFilterConditionMapper.selectList(new QueryWrapper<BossFilterConditionEntity>()
+                .eq("user_id", userId).orderByDesc("updated_at"));
+    }
+
+    public BossFilterConditionEntity saveFilterCondition(Long userId, String name, String conditions) {
+        BossFilterConditionEntity entity = new BossFilterConditionEntity();
+        entity.setUserId(userId);
+        entity.setFilterName(name);
+        entity.setFilterConditions(conditions);
+        entity.setCreatedAt(LocalDateTime.now());
+        entity.setUpdatedAt(LocalDateTime.now());
+        bossFilterConditionMapper.insert(entity);
+        return entity;
+    }
 
     // ==================== Option相关方法 ====================
 
@@ -703,6 +738,24 @@ public class BossService {
     public BossJobDataEntity findById(Long id) {
         if (id == null) return null;
         return bossJobDataMapper.selectById(id);
+    }
+
+    public BossJobDataEntity findByEncryptId(String encryptId, String encryptUserId) {
+        if (StringUtils.isBlank(encryptId)) return null;
+        QueryWrapper<BossJobDataEntity> wrapper = new QueryWrapper<>();
+        wrapper.eq("encrypt_id", encryptId);
+        if (StringUtils.isNotBlank(encryptUserId)) wrapper.eq("encrypt_user_id", encryptUserId);
+        return bossJobDataMapper.selectOne(wrapper.last("LIMIT 1"));
+    }
+
+    /** 回填详情接口返回的 security_id，避免历史岗位无法直接投递。 */
+    public void updateSecurityIdById(Long id, String securityId) {
+        if (id == null || StringUtils.isBlank(securityId)) return;
+        BossJobDataEntity update = new BossJobDataEntity();
+        update.setId(id);
+        update.setSecurityId(securityId);
+        update.setUpdatedAt(LocalDateTime.now());
+        bossJobDataMapper.updateById(update);
     }
 
     // ==================== 投递分析（Dashboard）相关方法 ====================

@@ -161,7 +161,9 @@ public class PlaywrightManager {
                             "--disable-blink-features=AutomationControlled",
                             "--disable-infobars",
                             "--no-first-run",
-                            "--start-maximized" // 最大化启动窗口
+                            "--start-maximized", // 最大化启动窗口
+                            "--remote-debugging-port=9222",
+                            "--remote-allow-origins=*"
                     )));
             userAutomationRegistry = new UserAutomationRegistry(userId -> new UserAutomationSession(userId, browser, false));
             ensureAutomationContext();
@@ -1214,16 +1216,26 @@ public class PlaywrightManager {
      * 触发 51job 登录流程：打开登录页并点击“微信扫码登录”按钮
      */
     public void triggerBossLogin(Long userId) {
-        log.info("开始通过 Python 脚本启动 Boss Chrome CDP 模式...");
+        log.info("开始启动 Boss Chrome CDP 模式...");
         new Thread(() -> {
             try {
-                java.util.List<String> cmd = new java.util.ArrayList<>();
-                cmd.add("D:\\04_GitHub\\boss-zhipin-scraper\\.venv\\Scripts\\python.exe");
-                cmd.add("scripts\\boss_cdp_raw.py");
-                cmd.add("--setup-chrome");
-
-                ProcessBuilder pb = new ProcessBuilder(cmd);
-                pb.directory(new java.io.File("D:\\04_GitHub\\boss-zhipin-scraper"));
+                String os = System.getProperty("os.name").toLowerCase();
+                ProcessBuilder pb;
+                if (os.contains("win")) {
+                    java.util.List<String> cmd = new java.util.ArrayList<>();
+                    cmd.add("D:\\04_GitHub\\boss-zhipin-scraper\\.venv\\Scripts\\python.exe");
+                    cmd.add("scripts\\boss_cdp_raw.py");
+                    cmd.add("--setup-chrome");
+                    pb = new ProcessBuilder(cmd);
+                    pb.directory(new java.io.File("D:\\04_GitHub\\boss-zhipin-scraper"));
+                } else {
+                    java.util.List<String> cmd = new java.util.ArrayList<>();
+                    cmd.add("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+                    cmd.add("--remote-debugging-port=9222");
+                    cmd.add("--user-data-dir=/tmp/boss_chrome_profile");
+                    pb = new ProcessBuilder(cmd);
+                }
+                
                 pb.redirectErrorStream(true);
                 Process process = pb.start();
                 
