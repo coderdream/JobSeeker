@@ -47,7 +47,7 @@ public class SecurityConfig {
                                 "/yupao/**",
                                 "/zhilian/**"
                         ).permitAll()
-                        .requestMatchers("/api/auth/login", "/api/auth/register", "/api/health").permitAll()
+                        .requestMatchers("/api/auth/login", "/api/auth/register", "/api/health", "/api/system/version").permitAll()
                         .anyRequest().authenticated())
                 .authenticationProvider(authenticationProvider())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

@@ -13,12 +13,8 @@ import java.util.Map;
 @RequestMapping("/api/system")
 public class SystemController {
 
-    private final BuildProperties buildProperties;
-
     @Autowired(required = false)
-    public SystemController(BuildProperties buildProperties) {
-        this.buildProperties = buildProperties;
-    }
+    private BuildProperties buildProperties;
 
     @GetMapping("/version")
     public Map<String, String> getVersion() {

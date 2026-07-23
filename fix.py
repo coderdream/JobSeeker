@@ -1,14 +1,23 @@
-import re
-with open('front/app/boss/page.tsx', 'r', encoding='utf-8') as f:
+import sys
+path = r'D:\04_GitHub\JobSeeker\src\main\java\com\wh\jobsbackend\worker\boss\Boss.java'
+with open(path, 'r', encoding='utf-8') as f:
     content = f.read()
 
-pattern = r'</TabsContent>\s*<TabsContent value="analytics" className="mt-5 min-w-0">\s*<AnalysisContent />\s*</TabsContent>\s*</Tabs>'
-replacement = """      </div>
-      
-      {/* Job List */}
-      <JobList />"""
+target = '''                cmd.add("--cdp-port");
+                cmd.add("9222");
 
-content = re.sub(pattern, replacement, content, flags=re.DOTALL)
+                log.info("[BOSS-BREADCRUMB] launch args: keyword={}, city={}, pages=3, noDetail=true, allowDomFallback=false",'''
 
-with open('front/app/boss/page.tsx', 'w', encoding='utf-8') as f:
-    f.write(content)
+replacement = '''                cmd.add("--cdp-port");
+                cmd.add("9222");
+                cmd.add("--allow-dom-fallback");
+
+                log.info("[BOSS-BREADCRUMB] launch args: keyword={}, city={}, pages=3, noDetail=true, allowDomFallback=true",'''
+
+if target in content:
+    content = content.replace(target, replacement)
+    with open(path, 'w', encoding='utf-8', newline='') as f:
+        f.write(content)
+    print('Replaced successfully')
+else:
+    print('Target not found')
