@@ -18,6 +18,7 @@ type BossJob = {
   hrPosition?: string
   deliveryStatus?: string
   jobUrl?: string
+  securityId?: string
 }
 
 type FilterField = 'keyword' | 'location' | 'experience' | 'degree' | 'salary'
@@ -50,6 +51,7 @@ export default function JobList() {
   // default to NOT showing Delivered or Discarded
   const [showDelivered, setShowDelivered] = useState(false)
   const [showDiscarded, setShowDiscarded] = useState(false)
+  const [onlyMissingSecurityId, setOnlyMissingSecurityId] = useState(false)
   const [filterOpen, setFilterOpen] = useState(false)
   const [filters, setFilters] = useState<JobFilter[]>([])
   const [appliedFilters, setAppliedFilters] = useState<JobFilter[]>([])
@@ -280,7 +282,10 @@ export default function JobList() {
     return actual.includes(expected)
   }
 
-  const visibleItems = items.filter(job => appliedFilters.every(filter => matchesFilter(job, filter)))
+  const visibleItems = items.filter(job => {
+    if (onlyMissingSecurityId && job.securityId?.trim()) return false
+    return appliedFilters.every(filter => matchesFilter(job, filter))
+  })
 
   return (
     <Card className="mt-4">
@@ -295,6 +300,10 @@ export default function JobList() {
             <label className="flex items-center gap-1 cursor-pointer">
               <input type="checkbox" checked={showDiscarded} onChange={e => { setShowDiscarded(e.target.checked); setPage(1); }} /> 
               显示已废弃
+            </label>
+            <label className="flex items-center gap-1 cursor-pointer">
+              <input type="checkbox" checked={onlyMissingSecurityId} onChange={e => { setOnlyMissingSecurityId(e.target.checked); setSelectedIds(new Set()) }} />
+              仅显示缺少 securityId
             </label>
           </div>
         </CardTitle>
