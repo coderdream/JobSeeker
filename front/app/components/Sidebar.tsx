@@ -65,6 +65,8 @@ export default function Sidebar() {
 
   const [mobileOpen, setMobileOpen] = useState(false)
   const [health, setHealth] = useState<'up' | 'degraded' | 'down' | 'unknown'>('unknown')
+  const [backendVersion, setBackendVersion] = useState<string>('')
+  const frontendVersion = process.env.NEXT_PUBLIC_FRONTEND_VERSION || 'vf.unknown'
   const checkingRef = useRef(false)
 
   useEffect(() => {
@@ -109,6 +111,22 @@ export default function Sidebar() {
     return () => {
       if (interval) clearInterval(interval)
     }
+  }, [])
+
+  useEffect(() => {
+    const fetchVersion = async () => {
+      try {
+        const baseUrl = getApiBaseUrl()
+        const res = await fetch(`${baseUrl}/api/system/version`)
+        if (res.ok) {
+          const data = await res.json()
+          setBackendVersion(data.backendVersion || '')
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+    void fetchVersion()
   }, [])
 
   const handleLogout = async () => {
@@ -160,6 +178,11 @@ export default function Sidebar() {
           <div className="min-w-0">
             <h1 className="truncate text-base font-semibold text-foreground">Get Jobs</h1>
             <p className="text-xs text-muted-foreground">招聘自动化工作台</p>
+            <div className="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground/80 font-mono">
+              <span>{frontendVersion}</span>
+              <span>|</span>
+              <span>{backendVersion || 'vb.loading'}</span>
+            </div>
           </div>
         </div>
 
