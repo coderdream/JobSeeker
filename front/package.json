@@ -1,6 +1,6 @@
 {
   "name": "front",
-  "version": "vf.260723.1406",
+  "version": "vf.260723.1522",
   "private": true,
   "scripts": {
     "dev": "node start-dev.mjs",
