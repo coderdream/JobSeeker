@@ -370,7 +370,8 @@ public class Boss {
 
             log.info("开始使用Python CDP抓取职位列表: keyword={}, city={}", keyword, cityCode);
             progressCallback.accept("开始抓取关键词: " + keyword, 0, 0);
-            try {
+
+            try {
                 // 创建临时输出文件
                 java.io.File tempFile = java.io.File.createTempFile("boss_jobs_" + keyword + "_", ".json");
                 tempFile.deleteOnExit();
@@ -395,8 +396,9 @@ public class Boss {
                 cmd.add(tempFile.getAbsolutePath());
                 cmd.add("--cdp-port");
                 cmd.add("9222");
+                cmd.add("--allow-dom-fallback");
 
-                log.info("[BOSS-BREADCRUMB] launch args: keyword={}, city={}, pages=3, noDetail=true, allowDomFallback=false",
+                log.info("[BOSS-BREADCRUMB] launch args: keyword={}, city={}, pages=3, noDetail=true, allowDomFallback=true",
                         keyword, cityCode);
 
                 // 添加其他过滤器
