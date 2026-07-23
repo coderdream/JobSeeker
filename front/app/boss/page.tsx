@@ -547,11 +547,12 @@ export default function BossPage() {
   }
 
   const handleStartDelivery = async () => {
+    if (isDelivering) return;
     try {
+      setIsDelivering(true)
       // 启动前先自动保存一次配置（静默保存），确保后端拿到的参数和前端一致
       await handleSave(true)
       
-      setIsDelivering(true)
       await startPlatformTask(authedFetch, 'boss')
     } catch (error: any) {
       console.error('Failed to start delivery:', error)
