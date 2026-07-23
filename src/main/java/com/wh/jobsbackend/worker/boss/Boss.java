@@ -361,7 +361,7 @@ public class Boss {
     private void postJobByCity(String cityCode) {
         log.info("[BOSS-BREADCRUMB] build={}, strategy=list-api-securityId, script={}",
                 CODEX_BUILD_MARKER,
-                "D:\\04_GitHub\\boss-zhipin-scraper\\scripts\\boss_cdp_raw.py");
+                "boss_cdp_raw.py");
         for (String keyword : config.getKeywords()) {
             if (shouldStopCallback != null && Boolean.TRUE.equals(shouldStopCallback.get())) {
                 progressCallback.accept("用户取消抓取", 0, 0);
@@ -380,9 +380,11 @@ public class Boss {
                 String os = System.getProperty("os.name").toLowerCase();
                 if (os.contains("win")) {
                     cmd.add("D:\\04_GitHub\\boss-zhipin-scraper\\.venv\\Scripts\\python.exe");
+                    cmd.add("-u");
                     cmd.add("D:\\04_GitHub\\boss-zhipin-scraper\\scripts\\boss_cdp_raw.py");
                 } else {
                     cmd.add("/Volumes/System/04_GitHub/boss-zhipin-scraper/.venv/bin/python");
+                    cmd.add("-u");
                     cmd.add("/Volumes/System/04_GitHub/boss-zhipin-scraper/scripts/boss_cdp_raw.py");
                 }
                 cmd.add("--keyword");
